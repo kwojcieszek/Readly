@@ -12,7 +12,10 @@ public final class SpeechPlayer {
     @ObservationIgnored private let delegate = Delegate()
     @ObservationIgnored private var currentUtterance: ObjectIdentifier?
 
-    public init() {
+    @ObservationIgnored private let voiceQuality: @MainActor () -> VoiceQuality
+
+    public init(voiceQuality: @escaping @MainActor () -> VoiceQuality = { .enhanced }) {
+        self.voiceQuality = voiceQuality
         synthesizer.delegate = delegate
         delegate.onFinish = { [weak self] utterance in
             guard let self, utterance == currentUtterance else { return }
@@ -35,10 +38,9 @@ public final class SpeechPlayer {
     public func speak(_ text: String, language: String?) {
         stop()
         let utterance = AVSpeechUtterance(string: text)
-        utterance.voice = SystemVoices.voice(for: language)
+        utterance.voice = SystemVoices.voice(for: language, quality: voiceQuality())
         // A little slower than normal speech, which helps when learning a language.
         utterance.rate = AVSpeechUtteranceDefaultSpeechRate * 0.9
-        utterance.prefersAssistiveTechnologySettings = true
         SystemVoices.activateAudioSession()
         currentUtterance = ObjectIdentifier(utterance)
         speakingText = text

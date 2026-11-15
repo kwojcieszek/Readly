@@ -24,7 +24,10 @@ public final class Narrator {
     @ObservationIgnored private var baseOffset = 0
     @ObservationIgnored private var spokenOffset = 0
 
-    public init() {
+    @ObservationIgnored private let voiceQuality: @MainActor () -> VoiceQuality
+
+    public init(voiceQuality: @escaping @MainActor () -> VoiceQuality = { .enhanced }) {
+        self.voiceQuality = voiceQuality
         synthesizer.delegate = delegate
         delegate.onProgress = { [weak self] utterance, location in
             guard let self, utterance == currentUtterance else { return }
@@ -58,8 +61,7 @@ public final class Narrator {
         baseOffset = start
         spokenOffset = start
         let utterance = AVSpeechUtterance(string: remainder)
-        utterance.voice = SystemVoices.voice(for: language)
-        utterance.prefersAssistiveTechnologySettings = true
+        utterance.voice = SystemVoices.voice(for: language, quality: voiceQuality())
         SystemVoices.activateAudioSession()
         currentUtterance = ObjectIdentifier(utterance)
         state = .speaking

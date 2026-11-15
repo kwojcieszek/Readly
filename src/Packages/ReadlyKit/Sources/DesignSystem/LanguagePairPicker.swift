@@ -25,7 +25,7 @@ public struct LanguagePairPicker: View {
 
     public var body: some View {
         HStack(spacing: 8) {
-            pill(Text(sourceCode?.uppercased() ?? "Auto"))
+            pill(sourceCode.map { Text(verbatim: $0.uppercased()) } ?? Text("Auto"))
                 .accessibilityLabel("Source language")
             Image(systemName: "arrow.right")
                 .font(.footnote.weight(.semibold))

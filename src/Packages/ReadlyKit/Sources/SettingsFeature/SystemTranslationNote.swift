@@ -10,7 +10,9 @@ struct SystemTranslationNote: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Label("Translates on this device with Apple’s built-in translator. Free, private, no API key.", systemImage: "lock.shield")
-            Text("The first translation into a language may ask to download it. \(managementHint)")
+            Text("The first translation into a language may ask to download it.")
+                .foregroundStyle(.secondary)
+            Text(managementHint)
                 .foregroundStyle(.secondary)
             if isSupported == false {
                 Label("The built-in translator doesn’t support this language. Pick another one or an AI provider.", systemImage: "exclamationmark.triangle.fill")
@@ -24,7 +26,7 @@ struct SystemTranslationNote: View {
         .task(id: targetCode) { isSupported = await SystemLanguageSupport.supports(targetCode: targetCode) }
     }
 
-    private var managementHint: String {
+    private var managementHint: LocalizedStringKey {
         #if os(macOS)
         "Downloaded languages are listed in System Settings › General › Language & Region › Translation Languages."
         #else

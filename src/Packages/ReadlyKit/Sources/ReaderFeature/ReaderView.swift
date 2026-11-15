@@ -10,7 +10,7 @@ public struct ReaderView: View {
     @State private var navigatorTab: NavigatorSheet.Tab?
     @State private var isSearchPresented = false
     @State private var isAppearancePresented = false
-    @State private var isGoToPagePresented = false
+    @State private var isLocationPickerPresented = false
     @State private var barSize = CGSize(width: 220, height: 40)
 
     @Environment(\.colorScheme) private var colorScheme
@@ -59,27 +59,86 @@ public struct ReaderView: View {
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if case .ready = model.phase {
+                readingProgress
+            }
+        }
         .background(palette.background.color.ignoresSafeArea())
         .animation(.snappy(duration: 0.22), value: isPanelVisible)
-        .background { PageTurnShortcuts(model: model) }
         .modifier(ReaderChrome(title: model.title, author: model.author))
         .toolbar { toolbar }
         .sheet(item: $navigatorTab) { NavigatorSheet(model: model, tab: $0) }
         .sheet(isPresented: $isSearchPresented) { SearchSheet(model: model) }
-        .sheet(isPresented: $isGoToPagePresented) {
-            GoToPageView(currentPage: model.bookPage ?? 1, totalPages: model.totalPages ?? 1, onGo: model.goToBookPage)
-                .presentationDetents([.height(150)])
+        .sheet(isPresented: $isLocationPickerPresented) {
+            if let current = model.bookPage, let total = model.totalPages {
+                GoToLocationView(currentLocation: current, totalLocations: total, onGo: model.goToBookPage)
+                    .presentationDetents([.height(150)])
+            }
         }
         .task {
             model.openExternalLink = { openURL($0) }
             await model.start(style: style)
         }
         .onChange(of: style) { _, newStyle in model.update(style: newStyle) }
-        .onChange(of: model.translation.display != nil) { _, isShown in
-            if isShown { isPanelVisible = true }
-        }
         .onChange(of: settings.targetLanguageCode) { model.translation.retranslate() }
+        .onChange(of: model.translation.display != nil) { _, hasTranslation in
+            if !hasTranslation { isPanelVisible = false }
+        }
         .onDisappear { model.close() }
+    }
+
+    private var readingProgress: some View {
+        HStack(spacing: 8) {
+            Group {
+                if let current = model.bookPage, let total = model.totalPages {
+                    Button("Location \(current) of \(total)") {
+                        isLocationPickerPresented = true
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Opens Go to Location")
+                } else {
+                    Text("Counting locations…")
+                }
+            }
+            .lineLimit(1)
+            .minimumScaleFactor(0.6)
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+
+            HStack(spacing: 8) {
+                locationArrow("Previous Location", systemImage: "chevron.left", forward: false)
+                locationArrow("Next Location", systemImage: "chevron.right", forward: true)
+            }
+            .fixedSize()
+
+            Text(model.progressLabel)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .trailing)
+                .accessibilityLabel("Reading progress: \(model.progressLabel)")
+        }
+        .font(.title3.weight(.semibold))
+        .monospacedDigit()
+        .foregroundStyle(palette.text.color)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 8)
+        .background(palette.background.color)
+    }
+
+    private func locationArrow(_ title: LocalizedStringKey, systemImage: String, forward: Bool) -> some View {
+        let canTurn = forward ? model.canTurnForward : model.canTurnBack
+        return Button {
+            model.turnPage(forward: forward)
+        } label: {
+            Label(title, systemImage: systemImage)
+                .labelStyle(.iconOnly)
+                .frame(width: 44, height: 44)
+                .background(palette.text.color.opacity(0.1), in: Circle())
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .opacity(canTurn ? 1 : 0.35)
+        .disabled(!canTurn)
     }
 
     @ViewBuilder private var content: some View {
@@ -107,17 +166,31 @@ public struct ReaderView: View {
         }
     }
 
-    /// The action bar that follows the highlighted text.
+    /// The translation and actions that follow the highlighted text.
     private var selectionBar: some View {
         GeometryReader { proxy in
             if let display = model.translation.display, let rect = model.selectionRect {
-                SelectionBar(
-                    display: display,
-                    isSaved: model.isCurrentTranslationSaved,
-                    isSpeaking: model.speech.isSpeaking(display.source),
-                    actions: panelActions
-                )
-                .fixedSize()
+                VStack(spacing: 0) {
+                    TranslationResult(
+                        display: display,
+                        maximumHeight: min(140, proxy.size.height * 0.35),
+                        openSettings: onOpenSettings
+                    )
+                    .padding(12)
+
+                    Divider()
+
+                    SelectionBar(
+                        display: display,
+                        isSaved: model.isCurrentTranslationSaved,
+                        isSpeaking: model.speech.isSpeaking(display.source),
+                        actions: panelActions
+                    )
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(width: min(300, max(0, proxy.size.width - 16)))
+                .card(radius: 12)
+                .shadow(color: .black.opacity(0.16), radius: 12, y: 4)
                 .onGeometryChange(for: CGSize.self, of: \.size) { barSize = $0 }
                 .position(SelectionBarPlacement(selection: rect, barSize: barSize, container: proxy.size).center)
             }
@@ -204,9 +277,9 @@ public struct ReaderView: View {
                 bookmarkButton
             }
             Button("Bookmarks", systemImage: "bookmark") { navigatorTab = .bookmarks }
-            Button(goToPageTitle, systemImage: "arrow.right.to.line") { isGoToPagePresented = true }
+            Button("Go to Location…", systemImage: "arrow.right.to.line") { isLocationPickerPresented = true }
                 .keyboardShortcut("g", modifiers: .command)
-                .disabled(model.totalPages == nil)
+                .disabled(model.bookPage == nil)
             Button(
                 model.isFavorite ? "Remove from Favorites" : "Add to Favorites",
                 systemImage: model.isFavorite ? "heart.fill" : "heart",
@@ -217,11 +290,6 @@ public struct ReaderView: View {
         }
         .menuIndicator(.hidden)
         .disabled(model.publication == nil)
-    }
-
-    /// Shows where the reader is, now that there is no bottom bar.
-    private var goToPageTitle: String {
-        model.totalPages == nil ? "Go to Page (counting pages…)" : "Go to Page… (\(model.pageLabel))"
     }
 
     private func togglePanel() {
@@ -244,7 +312,7 @@ public struct ReaderView: View {
     }
 }
 
-/// The reader's title area: a dark toolbar with title and author on the Mac,
+/// The reader's title area: a toolbar with title and author on the Mac,
 /// a bare navigation bar that leaves room for the buttons on iOS.
 private struct ReaderChrome: ViewModifier {
     let title: String
@@ -255,10 +323,9 @@ private struct ReaderChrome: ViewModifier {
         content
             .navigationTitle(title)
             .navigationSubtitle(author)
-            .toolbarBackground(Theme.chrome, for: .windowToolbar)
+            .toolbarBackground(Theme.surface, for: .windowToolbar)
             .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
-            .toolbarColorScheme(.dark, for: .windowToolbar)
-            // The window keeps its title; the toolbar shows it in light text instead.
+            // The window keeps its title; the toolbar also shows the author.
             .toolbar(removing: .title)
             .toolbar { titleItem }
         #else
@@ -282,8 +349,8 @@ private struct ReaderChrome: ViewModifier {
 
     private var titleLabel: some View {
         VStack(alignment: .leading, spacing: 1) {
-            Text(title).font(.headline).foregroundStyle(.white)
-            Text(author).font(.caption).foregroundStyle(.white.opacity(0.6))
+            Text(title).font(.headline).foregroundStyle(.primary)
+            Text(author).font(.caption).foregroundStyle(.secondary)
         }
         .lineLimit(1)
         .frame(maxWidth: 420, alignment: .leading)

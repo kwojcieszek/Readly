@@ -12,6 +12,8 @@ extension ThemeColor {
 struct ReaderStyle: Codable, Equatable {
     var fontFamily: String?
     var fontSize: Int
+    var horizontalMargin: Int
+    var verticalMargin: Int
     var text: String
     var background: String
     var link: String
@@ -22,6 +24,8 @@ struct ReaderStyle: Codable, Equatable {
         let palette = settings.theme.colors(isDark: colorScheme == .dark)
         fontFamily = settings.font.cssFamily
         fontSize = settings.fontSize
+        horizontalMargin = settings.horizontalMargin
+        verticalMargin = settings.verticalMargin
         text = palette.text.css
         background = palette.background.css
         link = "rgb(110, 79, 227)"

@@ -28,7 +28,20 @@ public struct BookImporter: Sendable {
         let id = UUID()
         let directory = try fileStore.createDirectory(for: id)
         do {
+            #if os(iOS)
+            var coordinationError: NSError?
+            var unpackError: Error?
+            NSFileCoordinator().coordinate(readingItemAt: source, error: &coordinationError) { file in
+                do {
+                    try handler.unpack(file, into: directory)
+                } catch {
+                    unpackError = error
+                }
+            }
+            if let error = coordinationError ?? unpackError { throw error }
+            #else
             try handler.unpack(source, into: directory)
+            #endif
             let publication = try handler.loadPublication(from: directory)
             return ImportedBook(
                 id: id,

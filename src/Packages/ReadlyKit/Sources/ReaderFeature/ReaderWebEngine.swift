@@ -4,22 +4,21 @@ import WebKit
 /// Owns the web view that renders chapters and bridges it to Swift.
 @MainActor
 final class ReaderWebEngine: NSObject {
-    let webView: WKWebView
+    private(set) lazy var webView = makeWebView()
     var onEvent: (ReaderEvent) -> Void = { _ in }
     var onLinkActivated: (URL) -> Void = { _ in }
     /// A horizontal swipe on touch devices; `true` means "next page".
     var onSwipe: (Bool) -> Void = { _ in }
 
     private static let handlerName = "readly"
-    private let readerScript: String
+    private static let readerScript = Bundle.module.url(forResource: "reader", withExtension: "js")
+        .flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? ""
 
-    override init() {
+    // SwiftUI may construct a reader model before deciding whether to keep it.
+    private func makeWebView() -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
-        webView = WKWebView(frame: .zero, configuration: configuration)
-        readerScript = Bundle.module.url(forResource: "reader", withExtension: "js")
-            .flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? ""
-        super.init()
+        let webView = WKWebView(frame: .zero, configuration: configuration)
 
         webView.configuration.userContentController.add(WeakMessageHandler(self), name: Self.handlerName)
         webView.navigationDelegate = self
@@ -31,14 +30,19 @@ final class ReaderWebEngine: NSObject {
         webView.scrollView.contentInsetAdjustmentBehavior = .never
         webView.scrollView.isScrollEnabled = false
         webView.scrollView.bounces = false
-        installSwipeRecognizers()
+        let pagePan = UIPanGestureRecognizer(target: self, action: #selector(handlePagePan))
+        pagePan.maximumNumberOfTouches = 1
+        // Trackpads deliver horizontal wheel events to the reader script.
+        pagePan.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+        pagePan.delegate = self
+        webView.addGestureRecognizer(pagePan)
         #endif
+        return webView
     }
 
     /// Loads a chapter and opens it at `start`. `token` is echoed in layout events.
     func load(chapter: URL, root: URL, style: ReaderStyle, start: ChapterStart, token: Int = 0) {
         let config = PageConfig(style: style, start: start, token: token)
-        applyTextSize(of: style)
         let controller = webView.configuration.userContentController
         controller.removeAllUserScripts()
         controller.addUserScript(WKUserScript(
@@ -47,7 +51,7 @@ final class ReaderWebEngine: NSObject {
             forMainFrameOnly: true
         ))
         controller.addUserScript(WKUserScript(
-            source: readerScript,
+            source: Self.readerScript,
             injectionTime: .atDocumentEnd,
             forMainFrameOnly: true
         ))
@@ -55,15 +59,7 @@ final class ReaderWebEngine: NSObject {
     }
 
     func apply(_ style: ReaderStyle) {
-        applyTextSize(of: style)
         run("window.Readly && window.Readly.applyStyle(\(Self.json(style)));")
-    }
-
-    /// Text size is native page zoom: unlike a CSS font size it also scales books
-    /// that hard-code their sizes in points or pixels.
-    private func applyTextSize(of style: ReaderStyle) {
-        let zoom = CGFloat(style.fontSize) / 100
-        if abs(webView.pageZoom - zoom) > 0.001 { webView.pageZoom = zoom }
     }
 
     func turnPage(forward: Bool) {
@@ -99,10 +95,7 @@ final class ReaderWebEngine: NSObject {
 
     /// Converts a rectangle reported by the page into the web view's coordinates.
     func viewRect(for selection: ReaderEvent.SelectionRect) -> CGRect {
-        let zoom = webView.pageZoom
-        return CGRect(
-            x: selection.x * zoom, y: selection.y * zoom, width: selection.width * zoom, height: selection.height * zoom
-        )
+        CGRect(x: selection.x, y: selection.y, width: selection.width, height: selection.height)
     }
 
     /// The first words of the visible page.
@@ -163,24 +156,17 @@ enum ChapterStart: Equatable {
 
 #if os(iOS)
 extension ReaderWebEngine: UIGestureRecognizerDelegate {
-    fileprivate func installSwipeRecognizers() {
-        for direction in [UISwipeGestureRecognizer.Direction.left, .right] {
-            let recognizer = UISwipeGestureRecognizer(target: self, action: #selector(handleSwipe))
-            recognizer.direction = direction
-            recognizer.delegate = self
-            webView.addGestureRecognizer(recognizer)
-        }
+    @objc private func handlePagePan(_ recognizer: UIPanGestureRecognizer) {
+        guard recognizer.state == .ended else { return }
+        let travel = recognizer.translation(in: webView)
+        guard abs(travel.x) >= 32, abs(travel.x) > abs(travel.y) else { return }
+        onSwipe(travel.x < 0)
     }
 
-    @objc private func handleSwipe(_ recognizer: UISwipeGestureRecognizer) {
-        onSwipe(recognizer.direction == .left)
-    }
-
-    func gestureRecognizer(
-        _ gestureRecognizer: UIGestureRecognizer,
-        shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
-    ) -> Bool {
-        true
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard let pan = gestureRecognizer as? UIPanGestureRecognizer else { return false }
+        let direction = pan.translation(in: webView)
+        return abs(direction.x) > abs(direction.y)
     }
 }
 #endif

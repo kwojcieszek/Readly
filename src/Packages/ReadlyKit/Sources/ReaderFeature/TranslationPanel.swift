@@ -5,6 +5,7 @@ import TranslationCore
 
 /// The translation of the tapped text, with its languages, actions and a small dictionary.
 struct TranslationPanel: View {
+    @Environment(\.locale) private var locale
     struct Actions {
         var speak: (String) -> Void
         var toggleSaved: () -> Void
@@ -35,7 +36,7 @@ struct TranslationPanel: View {
             LanguagePairPicker(
                 sourceCode: sourceLanguageCode,
                 targetCode: $settings.targetLanguageCode,
-                options: TargetLanguage.all.map { .init(code: $0.code, name: $0.displayName) }
+                options: TargetLanguage.all.map { .init(code: $0.code, name: $0.displayName(in: locale)) }
             )
 
             if let display {
@@ -72,7 +73,7 @@ private struct TranslationResultCard: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .lineLimit(3)
-                result
+                TranslationResult(display: display, maximumHeight: 180, openSettings: actions.openSettings)
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -84,19 +85,10 @@ private struct TranslationResultCard: View {
                     Pasteboard.copy(display.translatedText ?? display.source)
                 }
                 Spacer()
-                IconButton(
-                    isSpeaking ? "Stop" : "Listen to the Original",
-                    systemImage: isSpeaking ? "stop.fill" : "speaker.wave.2",
-                    isActive: isSpeaking
-                ) { actions.speak(display.source) }
+                IconButton.speak("Listen to the Original", isSpeaking: isSpeaking) { actions.speak(display.source) }
                 Spacer()
-                IconButton(
-                    isSaved ? "Remove from Saved Phrases" : "Save Phrase",
-                    systemImage: isSaved ? "star.fill" : "star",
-                    isActive: isSaved,
-                    action: actions.toggleSaved
-                )
-                .disabled(display.translatedText == nil)
+                IconButton.savePhrase(isSaved: isSaved, action: actions.toggleSaved)
+                    .disabled(display.translatedText == nil)
                 Spacer()
                 ShareLink(item: shareText) {
                     Image(systemName: "square.and.arrow.up")
@@ -113,14 +105,22 @@ private struct TranslationResultCard: View {
         .card()
     }
 
-    @ViewBuilder private var result: some View {
+    private var shareText: String {
+        guard let translation = display.translatedText else { return display.source }
+        return "\(display.source)\n\(translation)"
+    }
+}
+
+struct TranslationResult: View {
+    let display: TranslationDisplay
+    let maximumHeight: CGFloat
+    let openSettings: () -> Void
+
+    var body: some View {
         switch display.phase {
         case .loading:
-            HStack(spacing: 10) {
-                ProgressView().controlSize(.small)
-                Text("Translating…").foregroundStyle(.secondary)
-            }
-            .font(.callout)
+            LoadingLabel("Translating…")
+                .font(.callout)
         case .translated(let output):
             ScrollView {
                 Text(output.text)
@@ -128,24 +128,19 @@ private struct TranslationResultCard: View {
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxHeight: 180)
+            .frame(maxHeight: maximumHeight)
             .fixedSize(horizontal: false, vertical: true)
         case .failed(let message, let needsAPIKey):
             VStack(alignment: .leading, spacing: 8) {
                 Label(message, systemImage: "exclamationmark.triangle")
                     .font(.callout)
                 if needsAPIKey {
-                    Button("Open Settings", action: actions.openSettings)
+                    Button("Open Settings", action: openSettings)
                         .buttonStyle(.bordered)
                         .tint(Theme.accent)
                 }
             }
         }
-    }
-
-    private var shareText: String {
-        guard let translation = display.translatedText else { return display.source }
-        return "\(display.source)\n\(translation)"
     }
 }
 
@@ -178,7 +173,7 @@ private struct DictionaryCard: View {
         }
     }
 
-    private func section(_ title: String, @ViewBuilder content: () -> some View) -> some View {
+    private func section(_ title: LocalizedStringKey, @ViewBuilder content: () -> some View) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(title).font(.subheadline.weight(.semibold))
             content()

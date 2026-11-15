@@ -20,7 +20,7 @@ struct SavedPhraseRow: View {
             }
             .textSelection(.enabled)
             .frame(maxWidth: .infinity, alignment: .leading)
-            IconButton(isSpeaking ? "Stop" : "Listen", systemImage: isSpeaking ? "stop.fill" : "speaker.wave.2", isActive: isSpeaking, action: onSpeak)
+            IconButton.speak(isSpeaking: isSpeaking, action: onSpeak)
             IconButton("Remove", systemImage: "star.slash", action: onDelete)
         }
         .padding(.vertical, 10)

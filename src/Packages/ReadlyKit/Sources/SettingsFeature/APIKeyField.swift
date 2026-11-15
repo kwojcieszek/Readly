@@ -2,7 +2,7 @@ import DesignSystem
 import SwiftUI
 import TranslationCore
 
-/// Edits the keychain-stored API key of one provider.
+/// Edits the encrypted API key of one provider.
 struct APIKeyField: View {
     let provider: TranslationProviderKind
     let keyStore: any APIKeyStoring
@@ -59,7 +59,7 @@ struct APIKeyField: View {
             }
             .font(.caption)
         } else {
-            Label("Stored in your keychain, sent only to \(provider.shortName)", systemImage: "lock.fill")
+            Label("Encrypted in Readly settings, sent only to \(provider.shortName)", systemImage: "lock.fill")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

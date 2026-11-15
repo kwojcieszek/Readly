@@ -4,51 +4,57 @@ import LibraryData
 import LibraryFeature
 import SettingsFeature
 import SwiftUI
+import SystemTranslation
+import TranslationCore
 import TranslatorFeature
 
 /// The iPhone and iPad layout: a tab bar over the library, translator and settings.
 struct TabRootView: View {
     let environment: AppEnvironment
+    let translatorFactory: TranslatorFactory
+    @State private var settingsTranslation = WindowTranslation()
     @State private var isSettingsPresented = false
 
     var body: some View {
         TabView {
             Tab("Library", systemImage: "books.vertical") {
-                LibraryTab(environment: environment, section: .all, showsSectionChips: true) {
+                LibraryTab(environment: environment, translatorFactory: translatorFactory, section: .all, showsSectionChips: true) {
                     isSettingsPresented = true
                 }
             }
             Tab("Reading", systemImage: "book") {
-                LibraryTab(environment: environment, section: .reading, showsSectionChips: false) {
+                LibraryTab(environment: environment, translatorFactory: translatorFactory, section: .reading, showsSectionChips: false) {
                     isSettingsPresented = true
                 }
             }
             Tab("Translate", systemImage: "translate") {
                 NavigationStack {
                     TranslatorView(
-                        settings: environment.settings, translatorFactory: environment.translatorFactory, library: environment.library
+                        settings: environment.settings, translatorFactory: translatorFactory, library: environment.library
                     )
                 }
             }
             Tab("Settings", systemImage: "gearshape") {
                 NavigationStack {
                     SettingsView(
-                settings: environment.settings,
-                keyStore: environment.keyStore,
-                translatorFactory: environment.translatorFactory,
-                showsDoneButton: false
-            )
+                        settings: environment.settings,
+                        keyStore: environment.keyStore,
+                        translatorFactory: translatorFactory,
+                        showsDoneButton: false
+                    )
                 }
             }
         }
         .sheet(isPresented: $isSettingsPresented) {
             NavigationStack {
                 SettingsView(
-                settings: environment.settings,
-                keyStore: environment.keyStore,
-                translatorFactory: environment.translatorFactory
-            )
+                    settings: environment.settings,
+                    keyStore: environment.keyStore,
+                    translatorFactory: settingsTranslation.factory(keyStore: environment.keyStore)
+                )
             }
+            .systemTranslationHost(settingsTranslation.bridge)
+            .preferredColorScheme(environment.settings.appTheme.colorScheme)
             .tint(Theme.accent)
         }
     }
@@ -57,6 +63,7 @@ struct TabRootView: View {
 /// One tab that lists books and opens them in the reader.
 private struct LibraryTab: View {
     let environment: AppEnvironment
+    let translatorFactory: TranslatorFactory
     @State var section: LibrarySection
     let showsSectionChips: Bool
     let onOpenSettings: () -> Void
@@ -70,7 +77,7 @@ private struct LibraryTab: View {
                 showsSectionChips: showsSectionChips,
                 onOpen: { openedBook = $0 }
             )
-            .readerDestination($openedBook, environment: environment, onOpenSettings: onOpenSettings)
+            .readerDestination($openedBook, environment: environment, translatorFactory: translatorFactory, onOpenSettings: onOpenSettings)
         }
     }
 }

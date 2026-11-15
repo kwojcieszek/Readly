@@ -28,10 +28,16 @@ public struct VoiceSelector: Sendable {
     }
 
     /// The identifier of the best voice for `language`, or `nil` if none speaks it.
-    public func voice(for language: String) -> String? {
+    public func voice(for language: String, preferredQuality: Int? = nil) -> String? {
         let wanted = Tag(language)
         let matching = candidates.filter { Tag($0.language).language == wanted.language }
-        return matching.max { score($0, wanted) < score($1, wanted) }?.identifier
+        // Try the requested tier, then the best lower tier, then the nearest higher one.
+        let tier = preferredQuality.flatMap { quality in
+            let available = matching.map(\.quality)
+            return available.filter { $0 <= quality }.max() ?? available.min()
+        }
+        let eligible = tier.map { quality in matching.filter { $0.quality == quality } } ?? matching
+        return eligible.max { score($0, wanted) < score($1, wanted) }?.identifier
     }
 
     private func score(_ candidate: Candidate, _ wanted: Tag) -> Int {

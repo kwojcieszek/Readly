@@ -76,6 +76,83 @@ import WebKit
         #expect(selection.width > 5 && selection.height > 5)
     }
 
+    @Test func tapOnAnotherWordDismissesTheOpenTranslation() async throws {
+        try await loadChapter()
+        try await tap(characters: 4..<8, times: 1)
+        try await recorder.wait { if case .translate = $0 { true } else { false } }
+        try await tap(characters: 9..<12, times: 1)
+        try await recorder.wait { if case .dismiss = $0 { true } else { false } }
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(translations().map(\.text) == ["gate"])
+
+        recorder.events.removeAll()
+        try await tap(characters: 9..<12, times: 1)
+        try await recorder.wait { if case .translate = $0 { true } else { false } }
+        #expect(translations().map(\.text) == ["was"])
+    }
+
+    @Test func fixedWidthBookTextFitsAfterReaderResizes() async throws {
+        let chapter = directory.appending(path: "chapter.xhtml")
+        try """
+        <html xmlns="http://www.w3.org/1999/xhtml">
+          <head><meta name="viewport" content="width=1400"/></head>
+          <body style="min-width: 1400px !important">
+            <p style="width: 1400px; white-space: nowrap">
+              A narrow reading area must wrap this paragraph so it stays visible.
+            </p>
+          </body>
+        </html>
+        """.write(to: chapter, atomically: true, encoding: .utf8)
+        try await loadChapter()
+        engine.webView.frame.size = CGSize(width: 320, height: 600)
+        try await recorder.wait {
+            if case .layout(let layout) = $0 { return layout.width == 320 }
+            return false
+        }
+        let measurements = try await engine.webView.evaluateJavaScript("""
+            (function () {
+                var viewport = document.querySelector('meta[name="viewport"]');
+                var paragraph = document.querySelector('p');
+                var text = document.createRange();
+                text.selectNodeContents(paragraph);
+                var lines = Array.from(text.getClientRects());
+                return [
+                    viewport.getAttribute('content').includes('width=device-width'),
+                    lines.length > 1,
+                    lines.every(function (line) { return line.left >= 0 && line.right <= innerWidth; })
+                ];
+            })();
+            """) as? [Bool]
+        #expect(measurements == [true, true, true])
+    }
+
+    @Test func changingMarginsRepaginatesTheOpenChapter() async throws {
+        try await loadChapter()
+        let suiteName = "ReadlyMarginTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let settings = AppSettings(defaults: defaults)
+        #expect(settings.horizontalMargin == ReaderMargin.default)
+        #expect(settings.verticalMargin == ReaderMargin.default)
+        settings.horizontalMargin = 48
+        settings.verticalMargin = 32
+        let restoredSettings = AppSettings(defaults: defaults)
+
+        engine.apply(ReaderStyle(settings: restoredSettings, colorScheme: .light))
+        try await recorder.wait { if case .layout = $0 { true } else { false } }
+
+        let margins = try await engine.webView.evaluateJavaScript("""
+            (function () {
+                var style = getComputedStyle(document.body);
+                return [
+                    style.paddingTop, style.paddingBottom, style.paddingLeft, style.paddingRight,
+                    style.columnWidth, style.columnGap
+                ];
+            })();
+            """) as? [String]
+        #expect(margins == ["32px", "32px", "48px", "48px", "704px", "96px"])
+    }
+
     @Test func doubleTapTranslatesTheWholeSentence() async throws {
         try await loadChapter()
         try await tap(characters: 4..<8, times: 2)
@@ -86,6 +163,25 @@ import WebKit
         #expect(translations.first?.kind == .sentence)
         #expect(translations.first?.text == "The gate was wide open.")
         #expect(translations.first?.context == nil)
+    }
+
+    @Test func doubleTapIncludesTitlesAndNamesAcrossSourceLines() async throws {
+        try await loadChapter()
+        _ = try await engine.webView.evaluateJavaScript("""
+            document.querySelector('p').firstChild.nodeValue =
+                'I met Dr. Smith in New\\nYork. Then I left.';
+            true;
+            """)
+
+        try await tap(characters: 2..<5, times: 2)
+        try await recorder.wait { if case .translate = $0 { true } else { false } }
+        let translation = try #require(translations().first)
+        #expect(translation.kind == .sentence)
+        #expect(translation.text == "I met Dr. Smith in New York.")
+        let highlight = try await engine.webView.evaluateJavaScript("""
+            Array.from(CSS.highlights.get('readly'))[0].toString()
+            """) as? String
+        #expect(highlight == "I met Dr. Smith in New\nYork.")
     }
 
     private struct Translation {
@@ -144,8 +240,8 @@ import WebKit
         try await waitForPage(1)
         let layout = try #require(lastLayout())
         #expect(layout.pageCount > 2)
-        // 800 pt wide view at the default 110 % text size.
-        #expect((720...735).contains(layout.width))
+        // Text scaling leaves the viewport at its original width.
+        #expect(layout.width == 800)
 
         engine.goToPage(layout.pageCount - 1)
         try await waitForPage(layout.pageCount - 1)
@@ -159,10 +255,10 @@ import WebKit
         try await recorder.wait { $0 == .boundary(forward: false) }
     }
 
-    private func wheel(_ deltas: [Double]) async throws {
+    private func wheel(_ deltas: [Double], horizontal: Bool = true) async throws {
         let script = """
         \(deltas).forEach(function (delta) {
-          window.dispatchEvent(new WheelEvent('wheel', { deltaY: delta, cancelable: true }));
+          window.dispatchEvent(new WheelEvent('wheel', { \(horizontal ? "deltaX" : "deltaY"): delta, cancelable: true }));
         });
         true;
         """
@@ -173,10 +269,14 @@ import WebKit
         (try await engine.webView.evaluateJavaScript("Math.round(window.scrollX / window.innerWidth)") as? NSNumber)?.intValue
     }
 
-    @Test func wheelTurnsExactlyOnePagePerGesture() async throws {
+    @Test func horizontalSwipeTurnsExactlyOnePagePerGesture() async throws {
         try await loadChapter()
 
-        // One small mouse-wheel step is enough.
+        try await wheel([5, 20, 40], horizontal: false)
+        try await Task.sleep(for: .milliseconds(450))
+        #expect(try await currentPage() == 0)
+
+        // One small horizontal swipe is enough.
         try await wheel([5])
         try await waitForPage(1)
 
@@ -212,6 +312,8 @@ import WebKit
         let atEnd = try #require(lastLayout())
         #expect(atEnd.page == atEnd.pageCount - 1)
         #expect(atEnd.token == 7)
+        let offset = try await engine.webView.evaluateJavaScript("window.scrollX") as? Double
+        #expect(offset == Double(atEnd.page * atEnd.width))
 
         recorder.events.removeAll()
         engine.load(chapter: chapter, root: directory, style: style, start: .fragment("end"))
@@ -247,6 +349,7 @@ import WebKit
         try await loadChapter()
         let before = try #require(await pageCount())
         let widthBefore = try await textWidth()
+        let bodyWidthBefore = try await bodyWidth()
 
         let defaults = try #require(UserDefaults(suiteName: "ReadlyReaderTests"))
         let settings = AppSettings(defaults: defaults)
@@ -257,8 +360,18 @@ import WebKit
 
         let after = try #require(await pageCount())
         #expect(after > before)
-        // Zoomed text takes twice the share of the (fixed-size) view.
+        // Letters grow while the reading area stays the same width.
         #expect(try await textWidth() > widthBefore * 1.8)
+        #expect(try await bodyWidth() == bodyWidthBefore)
+
+        settings.fontSize = ReaderFontSize.default
+        engine.apply(ReaderStyle(settings: settings, colorScheme: .light))
+        _ = try await pageCount()
+        #expect(abs(try await textWidth() - widthBefore) < 0.001)
+    }
+
+    private func bodyWidth() async throws -> Double? {
+        try await engine.webView.evaluateJavaScript("document.body.getBoundingClientRect().width") as? Double
     }
 
     private func pageCount() async throws -> Int? {

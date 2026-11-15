@@ -7,7 +7,11 @@ public struct TargetLanguage: Sendable, Identifiable, Hashable {
 
     /// Name shown in the UI, in the user's language.
     public var displayName: String {
-        let name = Locale.current.localizedString(forLanguageCode: code) ?? englishName
+        displayName(in: .current)
+    }
+
+    public func displayName(in locale: Locale) -> String {
+        let name = locale.localizedString(forLanguageCode: code) ?? englishName
         return name.prefix(1).uppercased() + name.dropFirst()
     }
 

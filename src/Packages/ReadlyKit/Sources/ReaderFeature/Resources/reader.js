@@ -23,28 +23,37 @@
   var pageWidth = 1;
   var isReady = false;
 
-  function buildCSS(style) {
-    var width = window.innerWidth;
-    var height = window.innerHeight;
-    var maxTextWidth = 46 * 16;
-    var paddingX = Math.max(14, Math.round((width - maxTextWidth) / 2));
-    var paddingY = 28;
+  function buildCSS(style, width, height) {
+    var paddingX = Math.max(0, Math.min(style.horizontalMargin, Math.floor(width / 4)));
+    var paddingY = Math.max(0, Math.min(style.verticalMargin, Math.floor(height / 4)));
     var rules = [
       'html { background: ' + style.background + ' !important;' +
-        ' height: ' + height + 'px !important; overflow: hidden !important; margin: 0 !important; padding: 0 !important;' +
+        ' height: 100% !important; overflow: hidden !important; margin: 0 !important; padding: 0 !important;' +
         ' -webkit-text-size-adjust: 100% !important; touch-action: manipulation; }',
+      'html::after { content: ""; position: absolute; top: 0; left: 0; height: 1px;' +
+        ' width: var(--readly-scroll-width, 0px); pointer-events: none; }',
       'body { background: transparent !important; color: ' + style.text + ' !important;' +
-        ' box-sizing: border-box !important; width: auto !important; max-width: none !important;' +
+        ' box-sizing: border-box !important;' +
+        ' min-width: 0 !important; max-width: none !important;' +
         ' height: ' + height + 'px !important; margin: 0 !important;' +
         ' padding: ' + paddingY + 'px ' + paddingX + 'px !important;' +
         ' column-width: ' + (width - 2 * paddingX) + 'px !important; column-gap: ' + (2 * paddingX) + 'px !important;' +
         ' column-fill: auto !important; overflow: visible !important;' +
         ' line-height: 1.65 !important; overflow-wrap: break-word; -webkit-tap-highlight-color: transparent; }',
-      'body * { color: inherit !important; background-color: transparent !important; }',
+      'body * { color: inherit !important; background-color: transparent !important;' +
+        ' box-sizing: border-box; min-width: 0 !important; max-width: 100% !important;' +
+        ' overflow-wrap: anywhere !important; }',
+      'body :is(main, article, section, div, p) {' +
+        ' margin-inline: 0 !important; padding-inline: 0 !important; }',
+      'body :is(main, article, section, div) { padding-block: 0 !important; }',
+      ':is(body, main, article, section, div) > :first-child { margin-block-start: 0 !important; }',
+      ':is(body, main, article, section, div) > :last-child { margin-block-end: 0 !important; }',
+      'body p, body li, body blockquote, body td, body th { white-space: normal !important; }',
+      'body pre { white-space: pre-wrap !important; }',
+      'body table { table-layout: fixed; }',
       'a, a * { color: ' + style.link + ' !important; }',
       'img, svg, video { max-width: 100% !important; max-height: ' + (height - 2 * paddingY) + 'px !important;' +
         ' height: auto !important; object-fit: contain; break-inside: avoid; }',
-      'pre { white-space: pre-wrap !important; }',
       '::highlight(' + HIGHLIGHT + ') { background-color: ' + style.highlight + '; }'
     ];
     if (style.fontFamily) {
@@ -55,11 +64,14 @@
   }
 
   function ensureViewport() {
-    if (!document.head || document.querySelector('meta[name="viewport"]')) { return; }
-    var meta = document.createElement('meta');
-    meta.setAttribute('name', 'viewport');
+    if (!document.head) { return; }
+    var meta = document.querySelector('meta[name="viewport"]');
+    if (!meta) {
+      meta = document.createElementNS(document.head.namespaceURI, 'meta');
+      meta.setAttribute('name', 'viewport');
+      document.head.appendChild(meta);
+    }
     meta.setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no');
-    document.head.appendChild(meta);
   }
 
   // The range that is highlighted or selected, so the app can anchor its
@@ -117,10 +129,11 @@
     page = clampPage(target);
     if (page === from) { return; }
     document.body.style.transition = 'transform ' + SLIDE_MS + 'ms cubic-bezier(0.22, 0.61, 0.36, 1)';
-    document.body.style.transform = 'translate3d(' + ((from - page) * pageWidth) + 'px, 0, 0)';
+    var shift = (from - page) * pageWidth;
+    document.body.style.transform = 'translate3d(' + shift + 'px, 0, 0)';
     slideTimer = setTimeout(finishSlide, SLIDE_MS + 30);
     // The slide has not moved anything yet, so place the marked text where it will end up.
-    report((from - page) * pageWidth);
+    report(shift);
   }
 
   function goToPage(target, animated) {
@@ -134,6 +147,34 @@
     report();
   }
 
+  var originalFontSizes = new Map();
+
+  function scaleText(scale) {
+    // Restore the book's declarations before measuring so repeated updates
+    // never multiply the previous size or lose relative EPUB font sizes.
+    originalFontSizes.forEach(function (original, element) {
+      element.style.removeProperty('font-size');
+      if (original.value) {
+        element.style.setProperty('font-size', original.value, original.priority);
+      }
+    });
+    originalFontSizes.clear();
+    if (scale === 1) { return; }
+
+    var elements = [document.body].concat(Array.from(document.body.querySelectorAll('*')));
+    var sizes = elements.map(function (element) {
+      return element.style ? parseFloat(getComputedStyle(element).fontSize) : NaN;
+    });
+    elements.forEach(function (element, index) {
+      if (!Number.isFinite(sizes[index])) { return; }
+      originalFontSizes.set(element, {
+        value: element.style.getPropertyValue('font-size'),
+        priority: element.style.getPropertyPriority('font-size')
+      });
+      element.style.setProperty('font-size', sizes[index] * scale + 'px', 'important');
+    });
+  }
+
   // Rebuilds the columns; `fraction` (0...1) says where in the chapter to land.
   function layout(fraction) {
     if (!currentStyle) { return; }
@@ -144,9 +185,17 @@
       styleElement.id = 'readly-style';
       (document.head || document.documentElement).appendChild(styleElement);
     }
-    styleElement.textContent = buildCSS(currentStyle);
+    var width = window.innerWidth;
+    var height = window.innerHeight;
+    styleElement.textContent = buildCSS(currentStyle, width, height);
+    document.body.style.setProperty('width', width + 'px', 'important');
+    document.body.style.setProperty('min-width', '0', 'important');
+    scaleText(currentStyle.fontSize / 100);
     pageWidth = Math.max(1, window.innerWidth);
+    // Measure the chapter alone, then reserve a full viewport for its final column.
+    document.documentElement.style.removeProperty('--readly-scroll-width');
     pageCount = Math.max(1, Math.ceil((document.documentElement.scrollWidth - 2) / pageWidth));
+    document.documentElement.style.setProperty('--readly-scroll-width', (pageCount * pageWidth) + 'px');
     goToPage(Math.floor(fraction * pageCount + 0.0001), false);
   }
 
@@ -156,8 +205,7 @@
     layout();
   }
 
-  // A single key press can reach us twice: from the page's own key handler
-  // and from the app's toolbar shortcut. Collapse such echoes into one turn.
+  // Coalesce duplicate requests at the start of a page turn.
   var lastTurnTime = 0;
 
   function turnPage(direction) {
@@ -198,9 +246,8 @@
     clearTimeout(snapTimer);
     snapTimer = setTimeout(function () {
       if (slideTimer) { return; }
-      var nearest = Math.min(pageCount - 1, Math.max(0, Math.round(window.scrollX / pageWidth)));
-      if (nearest !== page || window.scrollY !== 0 || Math.abs(window.scrollX - nearest * pageWidth) > 1) {
-        goToPage(nearest, false);
+      if (window.scrollY !== 0 || Math.abs(window.scrollX - page * pageWidth) > 1) {
+        goToPage(page, false);
       }
     }, 180);
   }, { passive: true });
@@ -211,7 +258,7 @@
     resizeTimer = setTimeout(function () { layout(); }, 120);
   });
 
-  // Wheel and trackpad: one page per gesture.
+  // Horizontal trackpad swipes: one page per gesture.
   //
   // A trackpad swipe is a stream of events whose size rises while the fingers
   // move, peaks, then decays through up to a second of "momentum". The page
@@ -245,12 +292,12 @@
 
   window.addEventListener('wheel', function (event) {
     event.preventDefault();
+    if (Math.abs(event.deltaX) <= Math.abs(event.deltaY) || event.ctrlKey) { return; }
     var now = event.timeStamp || performance.now();
     var paused = now - wheel.lastTime > WHEEL_PAUSE_MS;
     wheel.lastTime = now;
 
-    var delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
-    if (delta === 0) { return; }
+    var delta = event.deltaX;
     var size = Math.abs(delta);
     var sign = delta > 0 ? 1 : -1;
 
@@ -275,20 +322,6 @@
       turnPage(wheel.sign);
     }
   }, { passive: false });
-
-  document.addEventListener('keydown', function (event) {
-    if (event.metaKey || event.ctrlKey || event.altKey) { return; }
-    var direction = 0;
-    if (event.key === 'ArrowRight' || event.key === 'PageDown' || (event.key === ' ' && !event.shiftKey)) {
-      direction = 1;
-    } else if (event.key === 'ArrowLeft' || event.key === 'PageUp' || (event.key === ' ' && event.shiftKey)) {
-      direction = -1;
-    }
-    if (direction !== 0) {
-      event.preventDefault();
-      turnPage(direction);
-    }
-  });
 
   // ---- Text lookup -------------------------------------------------------------
 
@@ -390,7 +423,15 @@
 
   function sentenceAt(text, offset) {
     var index = Math.min(Math.max(0, offset), text.length - 1);
-    var segment = segmenter('sentence').segment(text).containing(index);
+    // Ignore source line wrapping and periods in titles and initials. Keep the
+    // string the same length so the segment still maps to the original DOM.
+    var boundaryText = text.replace(/\s/g, ' ')
+      .replace(/(?<![\p{L}\p{N}])(mrs?|ms|dr|prof|mgr|inż|św)\.(?= +\p{L})/giu, '$1 ')
+      .replace(/(?<![\p{L}\p{N}])(\p{Lu})\.(?= *\p{Lu})/gu, function (initial, letter) {
+        // The English pronoun may end a sentence.
+        return letter === 'I' ? initial : letter + ' ';
+      });
+    var segment = segmenter('sentence').segment(boundaryText).containing(index);
     if (!segment) { return null; }
     return trimmedSpan(text, segment.index, segment.index + segment.segment.length);
   }
@@ -430,6 +471,7 @@
 
   function clearHighlight() {
     markedRange = null;
+    isTranslationOpen = false;
     if (window.CSS && CSS.highlights) { CSS.highlights.delete(HIGHLIGHT); }
   }
 
@@ -546,6 +588,7 @@
   var selectionTimer = null;
   var lastSelection = '';
   var lastHit = null;
+  var isTranslationOpen = false;
   var ignoreSelectionUntil = 0;
 
   function clearNativeSelection() {
@@ -562,6 +605,7 @@
       post({ type: 'dismiss' });
       return;
     }
+    isTranslationOpen = true;
     if (kind === 'sentence') {
       clearNativeSelection();
       highlight(hit.sentenceRange);
@@ -573,6 +617,17 @@
   }
 
   function handleTap(x, y) {
+    if (isTranslationOpen) {
+      clearTimeout(wordTimer);
+      wordTimer = null;
+      clearTimeout(selectionTimer);
+      lastTap = null;
+      lastSelection = '';
+      clearNativeSelection();
+      clearHighlight();
+      post({ type: 'dismiss' });
+      return;
+    }
     var now = Date.now();
     var isDouble = lastTap && now - lastTap.time < DOUBLE_TAP_MS &&
       Math.hypot(x - lastTap.x, y - lastTap.y) < 30;
@@ -633,6 +688,7 @@
     clearTimeout(wordTimer);
     clearHighlight();
     markedRange = selection.rangeCount ? selection.getRangeAt(0).cloneRange() : null;
+    isTranslationOpen = true;
     post({ type: 'translate', kind: 'selection', text: text, selection: markedRect() });
   }
 

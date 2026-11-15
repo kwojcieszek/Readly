@@ -31,14 +31,14 @@ struct ThemePicker: View {
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
                             .strokeBorder(isSelected ? Theme.accent : Color.gray.opacity(0.3), lineWidth: isSelected ? 2 : 1)
                     }
-                Text(theme.displayName)
+                Text(LocalizedStringKey(theme.displayName))
                     .font(.caption)
                     .foregroundStyle(isSelected ? .primary : .secondary)
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(theme.displayName) theme")
+        .accessibilityLabel(LocalizedStringKey(theme.displayName))
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }

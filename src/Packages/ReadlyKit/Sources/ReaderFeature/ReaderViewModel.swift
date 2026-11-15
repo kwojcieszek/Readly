@@ -28,8 +28,8 @@ final class ReaderViewModel {
     let engine = ReaderWebEngine()
     let measurer = ChapterMeasurer()
     let translation: TranslationController
-    let speech = SpeechPlayer()
-    let readAloud = ReadAloudController()
+    let speech: SpeechPlayer
+    let readAloud: ReadAloudController
     /// Bumped when a phrase is starred, so views re-check the saved state.
     var savedPhraseRevision = 0
 
@@ -46,6 +46,8 @@ final class ReaderViewModel {
         self.book = book
         self.library = library
         self.chapterIndex = book.chapterIndex
+        self.speech = SpeechPlayer { settings.voiceQuality }
+        self.readAloud = ReadAloudController { settings.voiceQuality }
         self.translation = TranslationController(settings: settings, factory: translatorFactory)
         engine.onEvent = { [weak self] in self?.handle($0) }
         engine.onLinkActivated = { [weak self] in self?.follow($0) }
@@ -87,15 +89,6 @@ final class ReaderViewModel {
 
     var progressLabel: String {
         overallProgress.formatted(.percent.precision(.fractionLength(0)))
-    }
-
-    /// Pages left in the current chapter, the visible one excluded.
-    var pagesLeftInChapter: Int { max(0, chapterPageCount - 1 - page) }
-
-    /// "12 / 362" once the book is counted, the page within the chapter until then.
-    var pageLabel: String {
-        if let bookPage, let totalPages { return "\(bookPage) / \(totalPages)" }
-        return "\(page + 1) / \(chapterPageCount)"
     }
 
     var canTurnBack: Bool { page > 0 || chapterIndex > 0 }

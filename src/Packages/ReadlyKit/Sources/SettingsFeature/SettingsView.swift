@@ -1,9 +1,11 @@
 import DesignSystem
 import Preferences
+import Speech
 import SwiftUI
 import TranslationCore
 
 public struct SettingsView: View {
+    @Environment(\.locale) private var locale
     @Bindable private var settings: AppSettings
     private let keyStore: any APIKeyStoring
     private let translatorFactory: TranslatorFactory
@@ -27,8 +29,11 @@ public struct SettingsView: View {
     public var body: some View {
         ScrollView {
             VStack(spacing: 16) {
+                languageCard
+                appThemeCard
                 translationCard
                 readingCard
+                speechCard
             }
             .frame(maxWidth: 560)
             .padding(20)
@@ -49,6 +54,31 @@ public struct SettingsView: View {
         }
         .onChange(of: settings.provider) { tester.reset() }
         .onChange(of: settings.targetLanguageCode) { tester.reset() }
+    }
+
+    private var languageCard: some View {
+        SettingsCard(title: "App Language", systemImage: "globe") {
+            Picker("App Language", selection: $settings.appLanguage) {
+                ForEach(AppLanguage.allCases) { language in
+                    Text(LocalizedStringKey(language.displayName)).tag(language)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var appThemeCard: some View {
+        SettingsCard(title: "App Theme", systemImage: "circle.lefthalf.filled") {
+            Picker("App Theme", selection: $settings.appTheme) {
+                ForEach(AppTheme.allCases) { theme in
+                    Text(theme.title).tag(theme)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+        }
     }
 
     private var translationCard: some View {
@@ -75,18 +105,28 @@ public struct SettingsView: View {
                 }
                 SettingsField(label: "Translate Into") {
                     Picker("Translate Into", selection: $settings.targetLanguageCode) {
-                        ForEach(TargetLanguage.all) { Text($0.displayName).tag($0.code) }
+                        ForEach(TargetLanguage.all) { Text($0.displayName(in: locale)).tag($0.code) }
                     }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 4)
-                    .frame(minHeight: 36)
-                    .background(Color.gray.opacity(0.12), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    .settingsMenuPicker()
                 }
             }
 
             ConnectionTestRow(settings: settings, factory: translatorFactory, tester: tester)
+        }
+    }
+
+    private var speechCard: some View {
+        SettingsCard(title: "Read Aloud", systemImage: "speaker.wave.2") {
+            SettingsField(label: "Voice Quality") {
+                Picker("Voice Quality", selection: $settings.voiceQuality) {
+                    ForEach(VoiceQuality.allCases, id: \.self) { quality in
+                        Text(verbatim: quality.rawValue).tag(quality)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
     }
 
@@ -105,30 +145,39 @@ public struct SettingsView: View {
             SettingsField(label: "Text Size · \(settings.fontSize)%") {
                 HStack(spacing: 12) {
                     Image(systemName: "textformat.size.smaller").foregroundStyle(.secondary)
-                    Slider(value: fontSize, in: fontSizeRange, step: Double(ReaderFontSize.step))
+                    Slider(
+                        value: $settings.fontSize.asDouble,
+                        in: ReaderFontSize.range.asDouble,
+                        step: Double(ReaderFontSize.step)
+                    )
                     Image(systemName: "textformat.size.larger").foregroundStyle(.secondary)
                 }
             }
 
             SettingsField(label: "Font") {
                 Picker("Font", selection: $settings.font) {
-                    ForEach(ReaderFont.allCases) { Text($0.displayName).tag($0) }
+                    ForEach(ReaderFont.allCases) { Text(LocalizedStringKey($0.displayName)).tag($0) }
                 }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 4)
-                .frame(minHeight: 36)
-                .background(Color.gray.opacity(0.12), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .settingsMenuPicker()
             }
+
+            marginSlider(
+                "Top & Bottom Margins · \(settings.verticalMargin) px",
+                value: $settings.verticalMargin
+            )
+            marginSlider(
+                "Left & Right Margins · \(settings.horizontalMargin) px",
+                value: $settings.horizontalMargin
+            )
         }
     }
 
-    private var fontSizeRange: ClosedRange<Double> {
-        Double(ReaderFontSize.range.lowerBound)...Double(ReaderFontSize.range.upperBound)
-    }
-
-    private var fontSize: Binding<Double> {
-        Binding { Double(settings.fontSize) } set: { settings.fontSize = Int($0.rounded()) }
+    private func marginSlider(_ label: LocalizedStringKey, value: Binding<Int>) -> some View {
+        SettingsField(label: label) {
+            Slider(value: value.asDouble, in: ReaderMargin.range.asDouble, step: Double(ReaderMargin.step)) {
+                Text(label)
+            }
+            .labelsHidden()
+        }
     }
 }

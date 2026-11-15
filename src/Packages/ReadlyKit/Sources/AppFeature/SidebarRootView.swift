@@ -2,11 +2,13 @@
 import LibraryData
 import LibraryFeature
 import SwiftUI
+import TranslationCore
 import TranslatorFeature
 
 /// The Mac layout: a sidebar of library sections next to the books or the reader.
 struct SidebarRootView: View {
     let environment: AppEnvironment
+    let translatorFactory: TranslatorFactory
     @State private var destination: SidebarDestination = .section(.all)
     @State private var openedBook: BookRecord?
     @Environment(\.openSettings) private var openSettings
@@ -17,7 +19,7 @@ struct SidebarRootView: View {
                 .navigationSplitViewColumnWidth(min: 210, ideal: 240, max: 300)
         } detail: {
             NavigationStack {
-                detail.readerDestination($openedBook, environment: environment) { openSettings() }
+                detail.readerDestination($openedBook, environment: environment, translatorFactory: translatorFactory) { openSettings() }
             }
         }
         .onChange(of: destination) { openedBook = nil }
@@ -33,7 +35,7 @@ struct SidebarRootView: View {
                 onOpen: { openedBook = $0 }
             )
         case .translator:
-            TranslatorView(settings: environment.settings, translatorFactory: environment.translatorFactory, library: environment.library)
+            TranslatorView(settings: environment.settings, translatorFactory: translatorFactory, library: environment.library)
         }
     }
 

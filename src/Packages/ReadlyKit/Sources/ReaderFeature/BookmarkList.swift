@@ -4,6 +4,8 @@ import SwiftUI
 
 /// The reader's bookmarks in reading order.
 struct BookmarkList: View {
+    @Environment(\.locale) private var locale
+
     let bookmarks: [Bookmark]
     let pageNumber: (Bookmark) -> Int?
     let isCurrent: (Bookmark) -> Bool
@@ -15,7 +17,7 @@ struct BookmarkList: View {
             ContentUnavailableView(
                 "No Bookmarks",
                 systemImage: "bookmark",
-                description: Text("Use the bookmark button while reading to mark a page.")
+                description: Text("Use the bookmark button while reading to save your location.")
             )
         } else {
             List {
@@ -63,9 +65,9 @@ struct BookmarkList: View {
 
     private func caption(for bookmark: Bookmark) -> String {
         var parts: [String] = []
-        if let page = pageNumber(bookmark) { parts.append("Page \(page)") }
+        if let page = pageNumber(bookmark) { parts.append(String(localized: "Location \(page)", locale: locale)) }
         if !bookmark.snippet.isEmpty, !bookmark.chapterTitle.isEmpty { parts.append(bookmark.chapterTitle) }
-        parts.append(bookmark.createdAt.formatted(date: .abbreviated, time: .omitted))
+        parts.append(bookmark.createdAt.formatted(.dateTime.year().month().day().locale(locale)))
         return parts.joined(separator: " · ")
     }
 }

@@ -2,13 +2,13 @@ import SwiftUI
 
 /// Asks for the name of a new or renamed collection.
 public struct CollectionNamePrompt: ViewModifier {
-    private let title: String
+    private let title: LocalizedStringKey
     @Binding private var isPresented: Bool
     private let initialName: String
     private let onCommit: (String) -> Void
     @State private var name = ""
 
-    public init(title: String, isPresented: Binding<Bool>, initialName: String = "", onCommit: @escaping (String) -> Void) {
+    public init(title: LocalizedStringKey, isPresented: Binding<Bool>, initialName: String = "", onCommit: @escaping (String) -> Void) {
         self.title = title
         _isPresented = isPresented
         self.initialName = initialName

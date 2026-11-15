@@ -11,7 +11,7 @@ enum SidebarDestination: Hashable {
     case translator
 }
 
-/// The dark sidebar: library sections with their book counts, collections, translator and trash.
+/// The sidebar: library sections with their book counts, collections, translator and trash.
 struct AppSidebar: View {
     @Binding var selection: SidebarDestination
     let library: BookLibrary
@@ -33,7 +33,7 @@ struct AppSidebar: View {
             }
             Section("Collections", isExpanded: $isCollectionsExpanded) {
                 ForEach(collections) { collection in
-                    row(collection.name, .collection(collection.id))
+                    row(Text(verbatim: collection.name), .collection(collection.id))
                         .contextMenu {
                             Button("Rename…", systemImage: "pencil") {
                                 collectionBeingRenamed = collection
@@ -49,13 +49,16 @@ struct AppSidebar: View {
             Section {
                 Label("Translator", systemImage: "translate").tag(SidebarDestination.translator)
                 row("Trash", .trash)
+                SettingsLink {
+                    Label("Settings", systemImage: "gearshape")
+                }
+                .buttonStyle(.plain)
             }
         }
         .listStyle(.sidebar)
         .scrollContentBackground(.hidden)
-        .background(Theme.chrome)
+        .background(Theme.surface)
         .safeAreaInset(edge: .top, spacing: 0) { brand }
-        .environment(\.colorScheme, .dark)
         .modifier(CollectionNamePrompt(title: "New Collection", isPresented: $isNamingCollection) { name in
             if let collection = library.createCollection(named: name) {
                 selection = .section(.collection(collection.id))
@@ -86,8 +89,12 @@ struct AppSidebar: View {
         .accessibilityAddTraits(.isHeader)
     }
 
-    private func row(_ title: String, _ section: LibrarySection) -> some View {
-        Label(title, systemImage: section.systemImage)
+    private func row(_ title: LocalizedStringKey, _ section: LibrarySection) -> some View {
+        row(Text(title), section)
+    }
+
+    private func row(_ title: Text, _ section: LibrarySection) -> some View {
+        Label { title } icon: { Image(systemName: section.systemImage) }
             .badge(books.count(where: section.contains))
             .tag(SidebarDestination.section(section))
     }

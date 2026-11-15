@@ -2,12 +2,12 @@ import SwiftUI
 
 /// A borderless, icon-only button with a comfortable hit area.
 public struct IconButton: View {
-    private let title: String
+    private let title: LocalizedStringKey
     private let systemImage: String
     private let isActive: Bool
     private let action: () -> Void
 
-    public init(_ title: String, systemImage: String, isActive: Bool = false, action: @escaping () -> Void) {
+    public init(_ title: LocalizedStringKey, systemImage: String, isActive: Bool = false, action: @escaping () -> Void) {
         self.title = title
         self.systemImage = systemImage
         self.isActive = isActive
@@ -25,6 +25,48 @@ public struct IconButton: View {
         .buttonStyle(.plain)
         .help(title)
         .accessibilityLabel(title)
+    }
+}
+
+extension IconButton {
+    /// Reads a text aloud; turns into a stop button while it is being read.
+    public static func speak(
+        _ title: LocalizedStringKey = "Listen",
+        isSpeaking: Bool,
+        action: @escaping () -> Void
+    ) -> IconButton {
+        IconButton(
+            isSpeaking ? "Stop" : title,
+            systemImage: isSpeaking ? "stop.fill" : "speaker.wave.2",
+            isActive: isSpeaking,
+            action: action
+        )
+    }
+
+    /// Stars a translation, or removes its star.
+    public static func savePhrase(isSaved: Bool, action: @escaping () -> Void) -> IconButton {
+        IconButton(
+            isSaved ? "Remove from Saved Phrases" : "Save Phrase",
+            systemImage: isSaved ? "star.fill" : "star",
+            isActive: isSaved,
+            action: action
+        )
+    }
+}
+
+/// A small spinner with a caption, e.g. "Translating…".
+public struct LoadingLabel: View {
+    private let title: LocalizedStringKey
+
+    public init(_ title: LocalizedStringKey) {
+        self.title = title
+    }
+
+    public var body: some View {
+        HStack(spacing: 10) {
+            ProgressView().controlSize(.small)
+            Text(title).foregroundStyle(.secondary)
+        }
     }
 }
 

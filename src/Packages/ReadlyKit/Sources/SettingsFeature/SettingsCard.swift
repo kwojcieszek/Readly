@@ -3,8 +3,8 @@ import SwiftUI
 
 /// A titled, rounded section of the settings screen.
 struct SettingsCard<Content: View>: View {
-    let title: String
-    let subtitle: String
+    let title: LocalizedStringKey
+    var subtitle: LocalizedStringKey? = nil
     let systemImage: String
     @ViewBuilder var content: Content
 
@@ -18,7 +18,9 @@ struct SettingsCard<Content: View>: View {
                     .background(Theme.accent.gradient, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                 VStack(alignment: .leading, spacing: 1) {
                     Text(title).font(.headline)
-                    Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                    if let subtitle {
+                        Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                    }
                 }
             }
             content
@@ -34,7 +36,7 @@ struct SettingsCard<Content: View>: View {
 
 /// A label above a control.
 struct SettingsField<Content: View>: View {
-    let label: String
+    let label: LocalizedStringKey
     @ViewBuilder var content: Content
 
     var body: some View {
@@ -52,7 +54,20 @@ extension View {
     func settingsInput() -> some View {
         textFieldStyle(.plain)
             .padding(.horizontal, 12)
-            .frame(minHeight: 36)
+            .settingsInputBackground()
+    }
+
+    /// A menu picker in the same soft box as `settingsInput()`.
+    func settingsMenuPicker() -> some View {
+        labelsHidden()
+            .pickerStyle(.menu)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 4)
+            .settingsInputBackground()
+    }
+
+    private func settingsInputBackground() -> some View {
+        frame(minHeight: 36)
             .background(Color.gray.opacity(0.12), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
     }
 }

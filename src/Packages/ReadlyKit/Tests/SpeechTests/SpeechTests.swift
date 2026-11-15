@@ -20,6 +20,14 @@ import Testing
         #expect(VoiceSelector(candidates: voices, preferredRegion: "PL").voice(for: "EN") == "gb-premium")
     }
 
+    @Test func selectsThePreferredTierAndFallsBackWithinTheSameLanguage() {
+        let selector = VoiceSelector(candidates: voices, preferredRegion: "US")
+        #expect(selector.voice(for: "en-GB", preferredQuality: 1) == "gb")
+        #expect(selector.voice(for: "en-GB", preferredQuality: 2) == "gb")
+        #expect(selector.voice(for: "en-US", preferredQuality: 3) == "gb-premium")
+        #expect(selector.voice(for: "de", preferredQuality: 3) == "de")
+    }
+
     @Test func unknownLanguageHasNoVoice() {
         #expect(VoiceSelector(candidates: voices).voice(for: "fr") == nil)
         #expect(VoiceSelector(candidates: voices).voice(for: "de-AT") == "de")

@@ -8,16 +8,18 @@ import TranslationCore
 
 /// A standalone translator plus the phrases starred while reading.
 public struct TranslatorView: View {
+    @Environment(\.locale) private var locale
     @Query(sort: \SavedPhrase.createdAt, order: .reverse) private var phrases: [SavedPhrase]
 
     @Bindable private var settings: AppSettings
     private let library: BookLibrary
     @State private var translator: QuickTranslator
-    @State private var speech = SpeechPlayer()
+    @State private var speech: SpeechPlayer
     @State private var text = ""
 
     public init(settings: AppSettings, translatorFactory: TranslatorFactory, library: BookLibrary) {
         self.settings = settings
+        _speech = State(initialValue: SpeechPlayer { settings.voiceQuality })
         self.library = library
         _translator = State(initialValue: QuickTranslator(settings: settings, factory: translatorFactory))
     }
@@ -28,7 +30,7 @@ public struct TranslatorView: View {
                 LanguagePairPicker(
                     sourceCode: nil,
                     targetCode: $settings.targetLanguageCode,
-                    options: TargetLanguage.all.map { .init(code: $0.code, name: $0.displayName) }
+                    options: TargetLanguage.all.map { .init(code: $0.code, name: $0.displayName(in: locale)) }
                 )
                 inputCard
                 resultCard
@@ -72,13 +74,10 @@ public struct TranslatorView: View {
         case .idle:
             EmptyView()
         case .loading:
-            HStack(spacing: 10) {
-                ProgressView().controlSize(.small)
-                Text("Translating…").foregroundStyle(.secondary)
-            }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .card()
+            LoadingLabel("Translating…")
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .card()
         case .failed(let message):
             Label(message, systemImage: "exclamationmark.triangle")
                 .padding(14)
@@ -98,16 +97,10 @@ public struct TranslatorView: View {
                 Divider()
                 HStack {
                     IconButton("Copy", systemImage: "doc.on.doc") { Pasteboard.copy(output.text) }
-                    IconButton(
-                        speech.isSpeaking(source) ? "Stop" : "Listen to the Original",
-                        systemImage: speech.isSpeaking(source) ? "stop.fill" : "speaker.wave.2",
-                        isActive: speech.isSpeaking(source)
-                    ) { speak(source) }
-                    IconButton(
-                        isSaved(source, output.text) ? "Remove from Saved Phrases" : "Save Phrase",
-                        systemImage: isSaved(source, output.text) ? "star.fill" : "star",
-                        isActive: isSaved(source, output.text)
-                    ) { toggleSaved(source, output.text) }
+                    IconButton.speak("Listen to the Original", isSpeaking: speech.isSpeaking(source)) { speak(source) }
+                    IconButton.savePhrase(isSaved: savedPhrase(source, output.text) != nil) {
+                        toggleSaved(source, output.text)
+                    }
                     Spacer()
                 }
             }
@@ -145,12 +138,12 @@ public struct TranslatorView: View {
         speech.toggle(text, language: LanguageGuesser.language(of: text, declared: nil))
     }
 
-    private func isSaved(_ source: String, _ translation: String) -> Bool {
-        phrases.contains { $0.source == source && $0.translation == translation }
+    private func savedPhrase(_ source: String, _ translation: String) -> SavedPhrase? {
+        phrases.first { $0.source == source && $0.translation == translation }
     }
 
     private func toggleSaved(_ source: String, _ translation: String) {
-        if let saved = phrases.first(where: { $0.source == source && $0.translation == translation }) {
+        if let saved = savedPhrase(source, translation) {
             library.removePhrase(saved)
         } else {
             library.savePhrase(source: source, translation: translation)

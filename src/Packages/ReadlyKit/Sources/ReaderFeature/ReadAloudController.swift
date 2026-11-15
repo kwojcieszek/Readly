@@ -23,10 +23,11 @@ final class ReadAloudController {
 
     private(set) var mode: Mode = .idle
     @ObservationIgnored var source: Source?
-    @ObservationIgnored private let narrator = Narrator()
+    @ObservationIgnored private let narrator: Narrator
     @ObservationIgnored private var startTask: Task<Void, Never>?
 
-    init() {
+    init(voiceQuality: @escaping @MainActor () -> VoiceQuality) {
+        narrator = Narrator(voiceQuality: voiceQuality)
         narrator.onFinish = { [weak self] in self?.advance() }
     }
 

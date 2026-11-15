@@ -23,10 +23,10 @@ final class ConnectionTester {
         state = .testing
         let request = TranslationRequest(
             kind: .sentence,
-            text: "Good morning!",
+            text: language.code == "en" ? "Bonjour !" : "Good morning!",
             targetLanguage: language.englishName,
             targetLanguageCode: language.code,
-            sourceLanguageCode: "en"
+            sourceLanguageCode: language.code == "en" ? "fr" : "en"
         )
         do {
             let translator = try factory.makeTranslator(provider: provider, model: model)

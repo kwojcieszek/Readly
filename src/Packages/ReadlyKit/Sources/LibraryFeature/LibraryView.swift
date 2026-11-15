@@ -5,6 +5,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 public struct LibraryView: View {
+    @Environment(\.locale) private var locale
     @Query(sort: \BookRecord.addedAt, order: .reverse) private var books: [BookRecord]
     @Query(sort: \BookCollection.name) private var collections: [BookCollection]
 
@@ -15,6 +16,9 @@ public struct LibraryView: View {
 
     @State private var importer = BookImportController()
     @State private var isImporterPresented = false
+    #if os(iOS)
+    @State private var isPickingFolders = false
+    #endif
     @State private var isDropTargeted = false
     @State private var isNamingCollection = false
     @State private var isEmptyingTrash = false
@@ -45,7 +49,7 @@ public struct LibraryView: View {
         .background(Theme.background)
         .overlay { if isDropTargeted { dropHighlight } }
         .overlay(alignment: .bottomTrailing) { if showsSectionChips, section != .trash { addButton } }
-        .navigationTitle(section.title(collections: collections))
+        .navigationTitle(section.title(collections: collections, locale: locale))
         #if os(iOS)
         .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search books")
         #else
@@ -54,19 +58,25 @@ public struct LibraryView: View {
         .toolbar { toolbar }
         .fileImporter(
             isPresented: $isImporterPresented,
-            allowedContentTypes: allowedTypes,
+            allowedContentTypes: importTypes,
             allowsMultipleSelection: true
         ) { result in
             switch result {
-            case .success(let urls): importer.importBooks(at: urls, into: library)
+            case .success(let urls):
+                #if os(iOS)
+                importer.importBooks(at: urls, into: library, pickingFolders: isPickingFolders)
+                #else
+                importer.importBooks(at: urls, into: library)
+                #endif
             case .failure(let error): importer.errorMessage = error.localizedDescription
             }
         }
         .dropDestination(for: URL.self) { urls, _ in
+            guard !importer.isImporting else { return false }
             importer.importBooks(at: urls, into: library)
             return true
         } isTargeted: { isDropTargeted = $0 }
-        .alert("Couldn’t Add Book", isPresented: errorBinding) {
+        .alert("Couldn’t Add Book", isPresented: Binding(isPresent: $importer.errorMessage)) {
             Button("OK", role: .cancel) {}
         } message: {
             Text(importer.errorMessage ?? "")
@@ -79,7 +89,7 @@ public struct LibraryView: View {
         })
         .confirmationDialog(
             "Delete “\(bookPendingDeletion?.title ?? "")” permanently?",
-            isPresented: deletionBinding,
+            isPresented: Binding(isPresent: $bookPendingDeletion),
             titleVisibility: .visible
         ) {
             Button("Delete", role: .destructive) {
@@ -101,10 +111,16 @@ public struct LibraryView: View {
                 Text(section.emptyDescription)
             } actions: {
                 if section == .all {
+                    #if os(iOS)
+                    Menu("Add Books") { importActions }
+                        .buttonStyle(.borderedProminent)
+                    #else
                     Button("Add Book") { isImporterPresented = true }
                         .buttonStyle(.borderedProminent)
+                    #endif
                 }
             }
+            .disabled(importer.isImporting)
         } else if filteredBooks.isEmpty {
             ContentUnavailableView.search(text: searchText)
         } else {
@@ -161,25 +177,53 @@ public struct LibraryView: View {
                     Button("Trash", systemImage: "trash") { section = .trash }
                 }
             } else {
+                #if os(iOS)
+                Menu("Add Books", systemImage: "plus") { importActions }
+                    .disabled(importer.isImporting)
+                #else
                 Button("Add Book", systemImage: "plus") { isImporterPresented = true }
                     .keyboardShortcut("o")
+                    .disabled(importer.isImporting)
+                #endif
             }
         }
     }
 
+    #if os(iOS)
+    @ViewBuilder private var importActions: some View {
+        Button("Choose Files", systemImage: "doc") {
+            isPickingFolders = false
+            isImporterPresented = true
+        }
+        Button("Choose Folders", systemImage: "folder") {
+            isPickingFolders = true
+            isImporterPresented = true
+        }
+    }
+    #endif
+
     /// The floating "add" button of the phone layout.
     private var addButton: some View {
-        Button { isImporterPresented = true } label: {
-            Image(systemName: "plus")
-                .font(.title2.weight(.semibold))
-                .foregroundStyle(.white)
-                .frame(width: 56, height: 56)
-                .background(Theme.accent, in: Circle())
-                .shadow(color: Theme.accent.opacity(0.4), radius: 10, y: 4)
+        Group {
+            #if os(iOS)
+            Menu { importActions } label: { addButtonLabel }
+            #else
+            Button { isImporterPresented = true } label: { addButtonLabel }
+            #endif
         }
         .buttonStyle(.plain)
+        .disabled(importer.isImporting)
         .padding(20)
-        .accessibilityLabel("Add Book")
+        .accessibilityLabel("Add Books")
+    }
+
+    private var addButtonLabel: some View {
+        Image(systemName: "plus")
+            .font(.title2.weight(.semibold))
+            .foregroundStyle(.white)
+            .frame(width: 56, height: 56)
+            .background(Theme.accent, in: Circle())
+            .shadow(color: Theme.accent.opacity(0.4), radius: 10, y: 4)
     }
 
     private var dropHighlight: some View {
@@ -208,17 +252,12 @@ public struct LibraryView: View {
         }
     }
 
-    private var allowedTypes: [UTType] {
+    private var importTypes: [UTType] {
+        #if os(iOS)
+        if isPickingFolders { return [.folder] }
+        #endif
         let types = library.registry.supportedFileExtensions.compactMap { UTType(filenameExtension: $0) }
         return types.isEmpty ? [.epub] : types
-    }
-
-    private var errorBinding: Binding<Bool> {
-        Binding { importer.errorMessage != nil } set: { if !$0 { importer.errorMessage = nil } }
-    }
-
-    private var deletionBinding: Binding<Bool> {
-        Binding { bookPendingDeletion != nil } set: { if !$0 { bookPendingDeletion = nil } }
     }
 
     /// Books in the trash have to be put back before they can be read.

@@ -1,5 +1,5 @@
+import CryptoKit
 import Foundation
-import Security
 
 public protocol APIKeyStoring: Sendable {
     func apiKey(for provider: TranslationProviderKind) -> String?
@@ -7,61 +7,89 @@ public protocol APIKeyStoring: Sendable {
     func setAPIKey(_ key: String, for provider: TranslationProviderKind) throws
 }
 
-public struct KeychainError: LocalizedError {
-    let status: OSStatus
+/// Keeps encrypted API keys in the app's local settings directory.
+public final class EncryptedAPIKeyStore: APIKeyStoring {
+    private static let lock = NSLock()
+    private let directory: URL
 
-    public var errorDescription: String? {
-        let detail = SecCopyErrorMessageString(status, nil) as String? ?? "code \(status)"
-        return "The API key could not be saved to the keychain (\(detail))."
-    }
-}
-
-/// Keeps API keys in the system keychain, one entry per provider.
-public struct KeychainAPIKeyStore: APIKeyStoring {
-    private let service: String
-
-    public init(service: String = "Readly.APIKeys") {
-        self.service = service
+    public init(directory: URL = URL.applicationSupportDirectory.appending(path: "Readly/APIKeys")) {
+        self.directory = directory
     }
 
     public func apiKey(for provider: TranslationProviderKind) -> String? {
-        var query = baseQuery(for: provider)
-        query[kSecReturnData as String] = true
-        query[kSecMatchLimit as String] = kSecMatchLimitOne
-        var result: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-              let data = result as? Data
-        else { return nil }
-        return String(data: data, encoding: .utf8)
+        Self.lock.withLock {
+            guard let key = try? readKey(for: provider), !key.isEmpty else { return nil }
+            return key
+        }
     }
 
     public func setAPIKey(_ key: String, for provider: TranslationProviderKind) throws {
-        let query = baseQuery(for: provider)
-        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            let status = SecItemDelete(query as CFDictionary)
-            guard status == errSecSuccess || status == errSecItemNotFound else {
-                throw KeychainError(status: status)
+        try Self.lock.withLock {
+            let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                do {
+                    try FileManager.default.removeItem(at: keyURL(for: provider))
+                } catch let error as CocoaError where error.code == .fileNoSuchFile {
+                    return
+                }
+            } else {
+                try writeKey(trimmed, for: provider)
             }
-            return
         }
-
-        let data = Data(trimmed.utf8)
-        var status = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
-        if status == errSecItemNotFound {
-            var item = query
-            item[kSecValueData as String] = data
-            status = SecItemAdd(item as CFDictionary, nil)
-        }
-        guard status == errSecSuccess else { throw KeychainError(status: status) }
     }
 
-    private func baseQuery(for provider: TranslationProviderKind) -> [String: Any] {
-        [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: provider.rawValue,
-        ]
+    private func readKey(for provider: TranslationProviderKind) throws -> String? {
+        let data: Data
+        do {
+            data = try Data(contentsOf: keyURL(for: provider))
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+            return nil
+        }
+        let sealed = try AES.GCM.SealedBox(combined: data)
+        let decrypted = try AES.GCM.open(sealed, using: encryptionKey(), authenticating: Data(provider.rawValue.utf8))
+        guard let key = String(data: decrypted, encoding: .utf8) else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        return key
+    }
+
+    private func writeKey(_ key: String, for provider: TranslationProviderKind) throws {
+        let sealed = try AES.GCM.seal(Data(key.utf8), using: encryptionKey(create: true),
+                                     authenticating: Data(provider.rawValue.utf8))
+        guard let data = sealed.combined else { throw CocoaError(.fileWriteUnknown) }
+        try write(data, to: keyURL(for: provider))
+    }
+
+    private func encryptionKey(create: Bool = false) throws -> SymmetricKey {
+        let url = directory.appending(path: "encryption-key")
+        do {
+            let data = try Data(contentsOf: url)
+            guard data.count == 32 else { throw CocoaError(.fileReadCorruptFile) }
+            return SymmetricKey(data: data)
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile && create {
+            // Keep the randomly generated encryption key local to this installation.
+            let key = SymmetricKey(size: .bits256)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
+                                                    attributes: [.posixPermissions: 0o700])
+            var settingsDirectory = directory
+            var values = URLResourceValues()
+            values.isExcludedFromBackup = true
+            try settingsDirectory.setResourceValues(values)
+            try write(key.withUnsafeBytes { Data($0) }, to: url)
+            return key
+        }
+    }
+
+    private func write(_ data: Data, to url: URL) throws {
+        #if os(iOS)
+        try data.write(to: url, options: [.atomic, .completeFileProtection])
+        #else
+        try data.write(to: url, options: [.atomic])
+        #endif
+    }
+
+    private func keyURL(for provider: TranslationProviderKind) -> URL {
+        directory.appending(path: provider.rawValue + ".sealed")
     }
 }
 

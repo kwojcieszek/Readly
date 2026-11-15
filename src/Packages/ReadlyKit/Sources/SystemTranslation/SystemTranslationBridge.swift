@@ -5,8 +5,8 @@ import TranslationCore
 
 /// Hands translations to Apple's on-device translator.
 ///
-/// A `TranslationSession` can only be obtained from SwiftUI's `translationTask`,
-/// and it lets the system ask to download missing languages. So requests wait in
+/// This bridge uses SwiftUI's `translationTask` so the system can ask to
+/// download missing languages. So requests wait in
 /// a queue here, the bridge asks the hosting view for a session for their language
 /// pair, and the view hands the session back to `run(_:)` to work through the queue.
 @MainActor
@@ -26,7 +26,7 @@ public final class SystemTranslationBridge {
     /// continuation is removed before it is resumed, so it is resumed exactly once.
     @ObservationIgnored private var waiting: [Int: CheckedContinuation<String, any Error>] = [:]
     @ObservationIgnored private var activePair: LanguagePair?
-    @ObservationIgnored private var isRunning = false
+    @ObservationIgnored private var runID: UUID?
     @ObservationIgnored private var hostCount = 0
     @ObservationIgnored private var nextJobID = 0
 
@@ -56,8 +56,8 @@ public final class SystemTranslationBridge {
     /// Called by the hosting view with the session it was given. Runs off the main actor,
     /// where the session lives; only the queue bookkeeping hops to it.
     nonisolated func run(_ session: TranslationSession) async {
-        guard let pair = await beginRun() else { return }
-        while let job = await nextJob(for: pair) {
+        guard let (pair, id) = await beginRun() else { return }
+        while let job = await nextJob(for: pair, runID: id) {
             let result: Result<String, any Error>
             do {
                 result = .success(try await session.translate(job.text).targetText)
@@ -68,7 +68,7 @@ public final class SystemTranslationBridge {
             }
             await finish(job.id, with: result)
         }
-        await endRun()
+        await endRun(id)
     }
 
     func hostAppeared() {
@@ -81,7 +81,9 @@ public final class SystemTranslationBridge {
         guard hostCount == 0 else { return }
         // Nothing can serve the queue any more.
         queue.removeAll()
-        isRunning = false
+        runID = nil
+        activePair = nil
+        configuration = nil
         for id in Array(waiting.keys) {
             finish(id, with: .failure(TranslationError.systemTranslationUnavailable))
         }
@@ -89,19 +91,21 @@ public final class SystemTranslationBridge {
 
     // MARK: Queue
 
-    private func beginRun() -> LanguagePair? {
-        guard !isRunning, let pair = activePair else { return nil }
-        isRunning = true
-        return pair
+    private func beginRun() -> (LanguagePair, UUID)? {
+        guard hostCount > 0, runID == nil, let pair = activePair else { return nil }
+        let id = UUID()
+        runID = id
+        return (pair, id)
     }
 
-    private func nextJob(for pair: LanguagePair) -> Job? {
-        guard let index = queue.firstIndex(where: { $0.pair == pair }) else { return nil }
+    private func nextJob(for pair: LanguagePair, runID: UUID) -> Job? {
+        guard self.runID == runID, let index = queue.firstIndex(where: { $0.pair == pair }) else { return nil }
         return queue.remove(at: index)
     }
 
-    private func endRun() {
-        isRunning = false
+    private func endRun(_ id: UUID) {
+        guard runID == id else { return }
+        runID = nil
         requestSession()
     }
 
@@ -112,7 +116,7 @@ public final class SystemTranslationBridge {
 
     /// Asks the hosting view for a session for the oldest waiting request.
     private func requestSession() {
-        guard !isRunning, hostCount > 0, let pair = queue.first?.pair else { return }
+        guard runID == nil, hostCount > 0, let pair = queue.first?.pair else { return }
         if pair == activePair, configuration != nil {
             configuration?.invalidate()
         } else {

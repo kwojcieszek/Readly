@@ -2,7 +2,7 @@ import DesignSystem
 import Preferences
 import SwiftUI
 
-/// Font size, typeface and theme controls shown from the reader toolbar.
+/// Reading appearance controls shown from the reader toolbar.
 struct AppearanceControls: View {
     @Bindable var settings: AppSettings
 
@@ -19,17 +19,17 @@ struct AppearanceControls: View {
                     .disabled(settings.fontSize >= ReaderFontSize.range.upperBound)
             }
 
-            Slider(value: fontSizeBinding, in: sliderRange, step: Double(ReaderFontSize.step)) {
+            Slider(value: $settings.fontSize.asDouble, in: ReaderFontSize.range.asDouble, step: Double(ReaderFontSize.step)) {
                 Text("Text Size")
             }
             .labelsHidden()
 
             Picker("Font", selection: $settings.font) {
-                ForEach(ReaderFont.allCases) { Text($0.displayName).tag($0) }
+                ForEach(ReaderFont.allCases) { Text(LocalizedStringKey($0.displayName)).tag($0) }
             }
 
             Picker("Theme", selection: $settings.theme) {
-                ForEach(ReaderTheme.allCases) { Text($0.displayName).tag($0) }
+                ForEach(ReaderTheme.allCases) { Text(LocalizedStringKey($0.displayName)).tag($0) }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -39,15 +39,7 @@ struct AppearanceControls: View {
         .tint(Theme.accent)
     }
 
-    private var sliderRange: ClosedRange<Double> {
-        Double(ReaderFontSize.range.lowerBound)...Double(ReaderFontSize.range.upperBound)
-    }
-
-    private var fontSizeBinding: Binding<Double> {
-        Binding { Double(settings.fontSize) } set: { settings.fontSize = Int($0.rounded()) }
-    }
-
-    private func sizeButton(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
+    private func sizeButton(_ title: LocalizedStringKey, systemImage: String, action: @escaping () -> Void) -> some View {
         Button(title, systemImage: systemImage, action: action)
             .labelStyle(.iconOnly)
             .frame(maxWidth: .infinity)

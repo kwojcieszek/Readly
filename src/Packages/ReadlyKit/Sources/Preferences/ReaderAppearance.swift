@@ -60,3 +60,9 @@ public enum ReaderFontSize {
     public static let step = 10
     public static let `default` = 110
 }
+
+public enum ReaderMargin {
+    public static let range = 0...64
+    public static let step = 2
+    public static let `default` = 12
+}

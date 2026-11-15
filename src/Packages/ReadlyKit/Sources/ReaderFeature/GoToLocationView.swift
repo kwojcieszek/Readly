@@ -1,10 +1,10 @@
 import DesignSystem
 import SwiftUI
 
-/// Jump to a page of the book by number.
-struct GoToPageView: View {
-    let currentPage: Int
-    let totalPages: Int
+/// Jump to a numbered location in the book.
+struct GoToLocationView: View {
+    let currentLocation: Int
+    let totalLocations: Int
     let onGo: (Int) -> Void
 
     @State private var text = ""
@@ -13,34 +13,35 @@ struct GoToPageView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Go to Page")
+            Text("Go to Location")
                 .font(.headline)
             HStack(spacing: 10) {
-                TextField("Page", text: $text, prompt: Text("\(currentPage)"))
+                TextField("Location", text: $text, prompt: Text("\(currentLocation)"))
                     .textFieldStyle(.roundedBorder)
                     .focused($isFocused)
                     .onSubmit(go)
                     #if os(iOS)
                     .keyboardType(.numberPad)
                     #endif
-                Text("of \(totalPages)")
+                Text("of \(totalLocations)")
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
                 Button("Go", action: go)
                     .buttonStyle(.borderedProminent)
                     .disabled(target == nil)
             }
-            Slider(value: sliderValue, in: 1...Double(max(2, totalPages)), step: 1)
-                .disabled(totalPages < 2)
+            Slider(value: sliderValue, in: 1...Double(max(2, totalLocations)), step: 1)
+                .disabled(totalLocations < 2)
+                .accessibilityLabel("Location")
         }
         .padding(18)
         .frame(width: 300)
         .tint(Theme.accent)
-        .onAppear { isFocused = true }
+        .defaultFocus($isFocused, true)
     }
 
     private var target: Int? {
-        guard let value = Int(text.trimmingCharacters(in: .whitespaces)), (1...totalPages).contains(value) else {
+        guard let value = Int(text.trimmingCharacters(in: .whitespaces)), (1...totalLocations).contains(value) else {
             return nil
         }
         return value
@@ -48,7 +49,7 @@ struct GoToPageView: View {
 
     private var sliderValue: Binding<Double> {
         Binding {
-            Double(target ?? currentPage)
+            Double(target ?? currentLocation)
         } set: {
             text = String(Int($0))
         }

@@ -17,7 +17,7 @@ let package = Package(
         .target(name: "EPUBSupport", dependencies: ["ReadlyCore", "ZIPFoundation"]),
         .target(name: "PDFSupport", dependencies: ["ReadlyCore"]),
         .target(name: "TranslationCore"),
-        .target(name: "Preferences", dependencies: ["TranslationCore"]),
+        .target(name: "Preferences", dependencies: ["TranslationCore", "Speech"]),
         .target(name: "LibraryData", dependencies: ["ReadlyCore"]),
         .target(name: "Speech"),
         .target(name: "SystemTranslation", dependencies: ["TranslationCore"]),
@@ -30,7 +30,7 @@ let package = Package(
             dependencies: ["ReadlyCore", "LibraryData", "TranslationCore", "Preferences", "Speech", "DesignSystem"],
             resources: [.process("Resources")]
         ),
-        .target(name: "SettingsFeature", dependencies: ["TranslationCore", "Preferences", "DesignSystem", "SystemTranslation"]),
+        .target(name: "SettingsFeature", dependencies: ["TranslationCore", "Preferences", "DesignSystem", "SystemTranslation", "Speech"]),
         .target(
             name: "TranslatorFeature",
             dependencies: ["TranslationCore", "Preferences", "LibraryData", "Speech", "DesignSystem"]

@@ -1,11 +1,11 @@
 import Foundation
 
 public enum TranslationProviderKind: String, CaseIterable, Codable, Sendable, Identifiable {
+    /// The translator built into iOS and macOS: on device, free, no API key.
+    case apple
     case openAI
     case anthropic
     case gemini
-    /// The translator built into iOS and macOS: on device, free, no API key.
-    case apple
 
     public var id: String { rawValue }
 

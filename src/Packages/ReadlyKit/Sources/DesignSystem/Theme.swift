@@ -5,8 +5,6 @@ public enum Theme {
     public static let accent = Color(red: 0.43, green: 0.31, blue: 0.89)
     /// A faint wash of the accent, for selected chips and highlights.
     public static let accentSoft = accent.opacity(0.14)
-    /// The dark gray of the sidebar and the reader's toolbar.
-    public static let chrome = Color(red: 0.17, green: 0.17, blue: 0.20)
     public static let cornerRadius: CGFloat = 10
     public static let cardRadius: CGFloat = 14
 
