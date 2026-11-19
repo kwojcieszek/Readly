@@ -42,7 +42,7 @@ import WebKit
     }
 
     /// Taps the middle of the characters `range` of the paragraph's first text node.
-    private func tap(characters range: Range<Int>, times: Int) async throws {
+    private func tap(characters range: Range<Int>, times: Int, hold: Bool = true) async throws {
         let script = """
         (function () {
           var text = document.querySelector('p').firstChild;
@@ -55,15 +55,25 @@ import WebKit
           var options = { clientX: x, clientY: y, isPrimary: true, pointerType: 'mouse', button: 0, bubbles: true };
           for (var i = 0; i < \(times); i++) {
             target.dispatchEvent(new PointerEvent('pointerdown', options));
-            target.dispatchEvent(new PointerEvent('pointerup', options));
+            if (\(hold)) {
+              window.testPointerTarget = target; window.testPointerOptions = options;
+            } else {
+              target.dispatchEvent(new PointerEvent('pointerup', options));
+            }
           }
           return true;
         })();
         """
         _ = try await engine.webView.evaluateJavaScript(script)
+        guard hold else { return }
+        try await Task.sleep(for: .milliseconds(400))
+        _ = try await engine.webView.evaluateJavaScript("""
+        window.testPointerTarget.dispatchEvent(new PointerEvent('pointerup', window.testPointerOptions));
+        true;
+        """)
     }
 
-    @Test func singleTapTranslatesTheWordWithItsSentence() async throws {
+    @Test func holdingTranslatesTheWordWithItsSentence() async throws {
         try await loadChapter()
         try await tap(characters: 4..<8, times: 1)
         try await recorder.wait { if case .translate = $0 { true } else { false } }
@@ -76,19 +86,60 @@ import WebKit
         #expect(selection.width > 5 && selection.height > 5)
     }
 
-    @Test func tapOnAnotherWordDismissesTheOpenTranslation() async throws {
+    @Test func tapOnAnotherWordSwitchesTheOpenTranslation() async throws {
         try await loadChapter()
         try await tap(characters: 4..<8, times: 1)
         try await recorder.wait { if case .translate = $0 { true } else { false } }
+        _ = try await engine.webView.evaluateJavaScript("""
+        window.previousHighlight = CSS.highlights.get('readly');
+        true;
+        """)
         try await tap(characters: 9..<12, times: 1)
-        try await recorder.wait { if case .dismiss = $0 { true } else { false } }
-        try await Task.sleep(for: .milliseconds(400))
-        #expect(translations().map(\.text) == ["gate"])
+        let clearedBeforeNextWord = try await engine.webView.evaluateJavaScript("""
+        window.previousHighlight.size === 0 &&
+          window.getSelection().isCollapsed
+        """) as? Bool
+        #expect(clearedBeforeNextWord == true)
+        try await recorder.wait { if case .translate(_, "was", _, _) = $0 { true } else { false } }
+        #expect(translations().map(\.text) == ["gate", "was"])
+        #expect(!recorder.events.contains { if case .dismiss = $0 { true } else { false } })
+        let highlightedText = try await engine.webView.evaluateJavaScript("""
+        Array.from(CSS.highlights.get('readly')).map(range => range.toString())
+        """) as? [String]
+        #expect(highlightedText == ["was"])
+    }
 
-        recorder.events.removeAll()
-        try await tap(characters: 9..<12, times: 1)
+    @Test func tappingTheSameWordAgainDismissesTheOpenTranslation() async throws {
+        try await loadChapter()
+        try await tap(characters: 4..<8, times: 1)
         try await recorder.wait { if case .translate = $0 { true } else { false } }
-        #expect(translations().map(\.text) == ["was"])
+        try await tap(characters: 4..<8, times: 1, hold: false)
+        try await recorder.wait { if case .dismiss = $0 { true } else { false } }
+        let cleared = try await engine.webView.evaluateJavaScript("""
+        !CSS.highlights.has('readly') && window.getSelection().isCollapsed
+        """) as? Bool
+        #expect(cleared == true)
+    }
+
+    @Test func closingTranslationClearsHighlightRangesAndNativeSelection() async throws {
+        try await loadChapter()
+        try await tap(characters: 4..<8, times: 1)
+        try await recorder.wait { if case .translate = $0 { true } else { false } }
+        _ = try await engine.webView.evaluateJavaScript("""
+        window.previousHighlight = CSS.highlights.get('readly');
+        var selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(Array.from(window.previousHighlight)[0].cloneRange());
+        true;
+        """)
+        engine.clearHighlight()
+        try await Task.sleep(for: .milliseconds(100))
+        let cleared = try await engine.webView.evaluateJavaScript("""
+        !CSS.highlights.has('readly') &&
+          window.previousHighlight.size === 0 &&
+          window.getSelection().isCollapsed
+        """) as? Bool
+        #expect(cleared == true)
     }
 
     @Test func fixedWidthBookTextFitsAfterReaderResizes() async throws {
@@ -153,35 +204,24 @@ import WebKit
         #expect(margins == ["32px", "32px", "48px", "48px", "704px", "96px"])
     }
 
-    @Test func doubleTapTranslatesTheWholeSentence() async throws {
+    @Test func shortTapDoesNotTranslate() async throws {
         try await loadChapter()
-        try await tap(characters: 4..<8, times: 2)
-        try await recorder.wait { if case .translate = $0 { true } else { false } }
-        try await Task.sleep(for: .milliseconds(500))
-        let translations = translations()
-        #expect(translations.count == 1)
-        #expect(translations.first?.kind == .sentence)
-        #expect(translations.first?.text == "The gate was wide open.")
-        #expect(translations.first?.context == nil)
+        try await tap(characters: 4..<8, times: 1, hold: false)
+        try await Task.sleep(for: .milliseconds(700))
+        #expect(translations().isEmpty)
     }
 
-    @Test func doubleTapIncludesTitlesAndNamesAcrossSourceLines() async throws {
+    @Test func twoShortTapsTranslateAndHighlightTheSentence() async throws {
         try await loadChapter()
-        _ = try await engine.webView.evaluateJavaScript("""
-            document.querySelector('p').firstChild.nodeValue =
-                'I met Dr. Smith in New\\nYork. Then I left.';
-            true;
-            """)
-
-        try await tap(characters: 2..<5, times: 2)
+        try await tap(characters: 4..<8, times: 2, hold: false)
         try await recorder.wait { if case .translate = $0 { true } else { false } }
         let translation = try #require(translations().first)
         #expect(translation.kind == .sentence)
-        #expect(translation.text == "I met Dr. Smith in New York.")
-        let highlight = try await engine.webView.evaluateJavaScript("""
-            Array.from(CSS.highlights.get('readly'))[0].toString()
-            """) as? String
-        #expect(highlight == "I met Dr. Smith in New\nYork.")
+        #expect(translation.text == "The gate was wide open.")
+        let highlightedText = try await engine.webView.evaluateJavaScript("""
+        Array.from(CSS.highlights.get('readly')).map(range => range.toString())
+        """) as? [String]
+        #expect(highlightedText == ["The gate was wide open."])
     }
 
     private struct Translation {

@@ -223,6 +223,9 @@ final class ReaderViewModel {
             let pageChanged = page != layout.page || !isChapterShown
             isChapterShown = true
             selectionRect = layout.selection.map(engine.viewRect)
+            if selectionRect == nil, translation.display != nil {
+                dismissTranslation()
+            }
             page = layout.page
             chapterPageCount = layout.pageCount
             pageMap.setPageCount(layout.pageCount, forChapter: chapterIndex)

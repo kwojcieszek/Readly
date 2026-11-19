@@ -48,7 +48,7 @@ struct TranslationPanel: View {
                 )
                 DictionaryCard(display: display, onTranslateSentence: actions.translateSentence)
             } else {
-                Text("Tap a word to translate it. Double-tap to translate the whole sentence.")
+                Text("Touch and hold a word to translate it. Tap to close the translation.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .padding(14)

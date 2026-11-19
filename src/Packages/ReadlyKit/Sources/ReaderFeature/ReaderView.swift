@@ -170,6 +170,8 @@ public struct ReaderView: View {
     private var selectionBar: some View {
         GeometryReader { proxy in
             if let display = model.translation.display, let rect = model.selectionRect {
+                let textLength = max(display.source.count, display.translatedText?.count ?? 0)
+                let preferredWidth = 300 + CGFloat(min(60, max(0, textLength - 40))) * 5
                 VStack(spacing: 0) {
                     TranslationResult(
                         display: display,
@@ -188,7 +190,7 @@ public struct ReaderView: View {
                     )
                 }
                 .fixedSize(horizontal: false, vertical: true)
-                .frame(width: min(300, max(0, proxy.size.width - 16)))
+                .frame(width: min(preferredWidth, max(0, proxy.size.width - 16)))
                 .card(radius: 12)
                 .shadow(color: .black.opacity(0.16), radius: 12, y: 4)
                 .onGeometryChange(for: CGSize.self, of: \.size) { barSize = $0 }

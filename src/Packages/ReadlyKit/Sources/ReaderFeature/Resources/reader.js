@@ -471,8 +471,13 @@
 
   function clearHighlight() {
     markedRange = null;
+    lastHit = null;
     isTranslationOpen = false;
-    if (window.CSS && CSS.highlights) { CSS.highlights.delete(HIGHLIGHT); }
+    if (window.CSS && CSS.highlights) {
+      var activeHighlight = CSS.highlights.get(HIGHLIGHT);
+      if (activeHighlight) { activeHighlight.clear(); }
+      CSS.highlights.delete(HIGHLIGHT);
+    }
   }
 
   // ---- Search ----------------------------------------------------------------------
@@ -578,13 +583,14 @@
     return text.replace(/[ \t\r\f\v]+/g, ' ').replace(/ ?\n ?/g, '\n').trim();
   }
 
-  // ---- Taps: single = word, double = sentence -------------------------------------
+  // ---- Hold for a word, double-tap for a sentence -----------------------------
 
+  var HOLD_MS = 150;
   var DOUBLE_TAP_MS = 320;
+  var lastTap = null;
+  var tapDismissTimer = null;
   var pointerStart = null;
   var isPointerDown = false;
-  var lastTap = null;
-  var wordTimer = null;
   var selectionTimer = null;
   var lastSelection = '';
   var lastHit = null;
@@ -597,55 +603,39 @@
     ignoreSelectionUntil = Date.now() + 900;
   }
 
+  function dismissSelection() {
+    clearTimeout(tapDismissTimer);
+    tapDismissTimer = null;
+    clearTimeout(selectionTimer);
+    selectionTimer = null;
+    lastSelection = '';
+    clearNativeSelection();
+    clearHighlight();
+    // WebKit can apply its default text selection after the pointer handler.
+    requestAnimationFrame(function () {
+      if (!isTranslationOpen && !markedRange && !isPointerDown) {
+        clearNativeSelection();
+      }
+    });
+  }
+
   function translateAt(x, y, kind) {
     var hit = lookup(x, y);
+    clearNativeSelection();
+    clearHighlight();
     lastHit = hit;
     if (!hit) {
-      clearHighlight();
       post({ type: 'dismiss' });
       return;
     }
     isTranslationOpen = true;
     if (kind === 'sentence') {
-      clearNativeSelection();
       highlight(hit.sentenceRange);
       post({ type: 'translate', kind: 'sentence', text: hit.sentence, selection: markedRect() });
     } else {
       highlight(hit.wordRange);
       post({ type: 'translate', kind: 'word', text: hit.word, context: hit.sentence, selection: markedRect() });
     }
-  }
-
-  function handleTap(x, y) {
-    if (isTranslationOpen) {
-      clearTimeout(wordTimer);
-      wordTimer = null;
-      clearTimeout(selectionTimer);
-      lastTap = null;
-      lastSelection = '';
-      clearNativeSelection();
-      clearHighlight();
-      post({ type: 'dismiss' });
-      return;
-    }
-    var now = Date.now();
-    var isDouble = lastTap && now - lastTap.time < DOUBLE_TAP_MS &&
-      Math.hypot(x - lastTap.x, y - lastTap.y) < 30;
-    clearTimeout(wordTimer);
-    wordTimer = null;
-
-    if (isDouble) {
-      lastTap = null;
-      translateAt(x, y, 'sentence');
-      return;
-    }
-    lastTap = { x: x, y: y, time: now };
-    wordTimer = setTimeout(function () {
-      wordTimer = null;
-      var selection = window.getSelection();
-      if (selection && !selection.isCollapsed) { return; }
-      translateAt(x, y, 'word');
-    }, DOUBLE_TAP_MS);
   }
 
   document.addEventListener('pointerdown', function (event) {
@@ -657,20 +647,47 @@
   document.addEventListener('pointercancel', function () {
     isPointerDown = false;
     pointerStart = null;
+    lastTap = null;
   }, true);
 
   document.addEventListener('pointerup', function (event) {
+    if (!event.isPrimary || (event.pointerType === 'mouse' && event.button !== 0)) { return; }
     isPointerDown = false;
     var start = pointerStart;
     pointerStart = null;
     if (!start) { return; }
+    var previousTap = lastTap;
+    lastTap = null;
     var moved = Math.hypot(event.clientX - start.x, event.clientY - start.y);
-    if (moved > 8 || Date.now() - start.time > 450) {
+    if (moved > 8) {
       scheduleSelectionCheck();
       return;
     }
     if (event.target && event.target.closest && event.target.closest('a[href]')) { return; }
-    handleTap(event.clientX, event.clientY);
+    var now = Date.now();
+    if (now - start.time >= HOLD_MS) {
+      dismissSelection();
+      translateAt(event.clientX, event.clientY, 'word');
+    } else if (previousTap && now - previousTap.time <= DOUBLE_TAP_MS &&
+        Math.hypot(event.clientX - previousTap.x, event.clientY - previousTap.y) < 30) {
+      dismissSelection();
+      translateAt(event.clientX, event.clientY, 'sentence');
+      requestAnimationFrame(function () {
+        if (!isPointerDown) { clearNativeSelection(); }
+      });
+    } else {
+      lastTap = { x: event.clientX, y: event.clientY, time: now };
+      if (isTranslationOpen) {
+        // Wait for a second tap before closing an open translation.
+        clearTimeout(tapDismissTimer);
+        tapDismissTimer = setTimeout(function () {
+          dismissSelection();
+          post({ type: 'dismiss' });
+        }, DOUBLE_TAP_MS);
+      } else {
+        dismissSelection();
+      }
+    }
   }, true);
 
   // ---- Free selection ----------------------------------------------------------------
@@ -685,7 +702,6 @@
     var text = selection.toString().replace(/\s+/g, ' ').trim();
     if (!text || text === lastSelection) { return; }
     lastSelection = text;
-    clearTimeout(wordTimer);
     clearHighlight();
     markedRange = selection.rangeCount ? selection.getRangeAt(0).cloneRange() : null;
     isTranslationOpen = true;
@@ -739,7 +755,7 @@
     turnPage: turnPage,
     goToPage: function (target) { goToPage(target, false); },
     goToFragment: goToFragment,
-    clearHighlight: clearHighlight
+    clearHighlight: dismissSelection
   };
 
   ensureViewport();
